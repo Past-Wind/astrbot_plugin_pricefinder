@@ -1,12 +1,8 @@
 <div align="center">
 
-# 🎯 PriceFinder - 慢慢买商品比价插件
+<img src="logo.png" width="128" alt="PriceFinder Logo">
 
-<p align="center">
-  <a href="https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases"><img src="https://img.shields.io/github/v/release/Past-Wind/astrbot_plugin_pricefinder?color=76bad9" alt="Release"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="https://github.com/Past-Wind/astrbot_plugin_pricefinder/stargazers"><img src="https://img.shields.io/github/stars/Past-Wind/astrbot_plugin_pricefinder?style=social" alt="Stars"></a>
-</p>
+# 🎯 PriceFinder - 慢慢买商品比价插件
 
 🤖 AstrBot 价格搜索插件 — 搜索慢慢买商品比价信息
 
@@ -27,13 +23,12 @@
 - ✅ **向量语义搜索**: 即使关键词不完全匹配，也能找到语义相似的缓存结果
 - ✅ **AI 结果过滤**: 使用 LLM 对搜索结果去重、排序、过滤，提升结果质量
 - ✅ **LLM Tool**: AI 可自主调用 `search_prices` 工具查询商品价格
-- ⬜ **多数据源支持**: 支持京东、淘宝、拼多多等更多平台的比价
+- ⬜ **多数据源支持**: 支持喵喵折、购物党等更多第三方平台的比价
 - ⬜ **价格历史追踪**: 记录商品价格变化趋势，生成价格走势图
 - ⬜ **降价提醒**: 设置目标价格，当商品降价时主动通知用户
 - ⬜ **商品收藏夹**: 收藏感兴趣的商品，方便后续查看
 - ⬜ **批量搜索**: 支持一次搜索多个关键词
 - ⬜ **数据导出**: 将搜索结果导出为 CSV/Excel 格式
-- ⬜ **语音搜索**: 支持语音输入关键词进行搜索
 
 ---
 
