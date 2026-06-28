@@ -1,14 +1,92 @@
-# astrbot-plugin-helloworld
+<div align="center">
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+# 🎯 PriceFinder - 慢慢买商品比价插件
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+<p align="center">
+  <a href="https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases"><img src="https://img.shields.io/github/v/release/Past-Wind/astrbot_plugin_pricefinder?color=76bad9" alt="Release"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://github.com/Past-Wind/astrbot_plugin_pricefinder/stargazers"><img src="https://img.shields.io/github/stars/Past-Wind/astrbot_plugin_pricefinder?style=social" alt="Stars"></a>
+</p>
 
-# Supports
+🤖 AstrBot 价格搜索插件 — 搜索慢慢买商品比价信息
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+</div>
+
+---
+
+## 📖 简介
+
+本项目是一个 **vibe-coding** 项目，使用 AI 辅助编程完成开发。
+
+---
+
+## 🚀 核心功能
+
+- ✅ **商品比价搜索**: 从慢慢买 (ManManBuy) 抓取商品比价信息，包含标题、价格、商城、链接
+- ✅ **智能缓存**: 缓存搜索结果避免重复爬取，支持 TTL 过期自动清理
+- ✅ **向量语义搜索**: 即使关键词不完全匹配，也能找到语义相似的缓存结果
+- ✅ **AI 结果过滤**: 使用 LLM 对搜索结果去重、排序、过滤，提升结果质量
+- ✅ **LLM Tool**: AI 可自主调用 `search_prices` 工具查询商品价格
+- ⬜ **多数据源支持**: 支持京东、淘宝、拼多多等更多平台的比价
+- ⬜ **价格历史追踪**: 记录商品价格变化趋势，生成价格走势图
+- ⬜ **降价提醒**: 设置目标价格，当商品降价时主动通知用户
+- ⬜ **商品收藏夹**: 收藏感兴趣的商品，方便后续查看
+- ⬜ **批量搜索**: 支持一次搜索多个关键词
+- ⬜ **数据导出**: 将搜索结果导出为 CSV/Excel 格式
+- ⬜ **语音搜索**: 支持语音输入关键词进行搜索
+
+---
+
+## 🏁 快速开始
+
+### 📦 安装
+
+将插件文件夹放入 AstrBot 的 `data/plugins` 目录。AstrBot 会自动安装依赖。
+
+### ⚙️ 配置
+
+在 AstrBot WebUI 的插件管理中配置。主要设置项：
+
+**🔍 搜索设置**:
+- `max_results`: 最大返回结果数（默认 5）
+
+**💾 缓存设置**:
+- `cache_enabled`: 启用缓存（默认 true）
+- `cache_ttl_days`: 缓存有效期天数（默认 1）
+- `vector_search_enabled`: 启用向量语义搜索（默认 true）
+
+**🤖 AI 过滤设置**:
+- `ai_filter_enabled`: 启用 AI 过滤（默认 true）
+- `ai_filter_provider`: LLM 提供商 ID（留空使用 AstrBot 默认）
+
+---
+
+## 💻 命令
+
+| 命令 | 说明 |
+| :--- | :--- |
+| `/price search <关键词>` | 🔍 搜索慢慢买商品比价信息 |
+
+---
+
+## 🏗️ 架构
+
+### 🧩 核心组件
+
+1. **💾 CacheManager**
+   - JSON 文件缓存 + 向量相似度搜索
+   - TTL 过期自动清理 + LRU 淘汰
+
+2. **🕷️ ManManBuy Scraper**
+   - 使用 httpx 抓取 `s.manmanbuy.com` 搜索结果
+   - BeautifulSoup 解析 CSS 选择器提取商品信息
+
+3. **🧠 AI Filter**
+   - 调用 LLM 对搜索结果去重、排序、过滤
+   - 降级策略：无 LLM 提供商时使用原始结果
+
+---
+
+## 📜 许可证
+
+AGPL-3.0

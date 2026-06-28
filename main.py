@@ -1,24 +1,760 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger
+"""
+PriceFinder - 慢慢买商品比价插件
 
-@register("helloworld", "YourName", "一个简单的 Hello World 插件", "1.0.0")
-class MyPlugin(Star):
-    def __init__(self, context: Context):
+AstrBot 插件，从慢慢买 (ManManBuy) 网站抓取商品比价信息。
+支持智能缓存、向量语义搜索、AI 结果过滤等功能。
+
+架构:
+- CacheManager: JSON 文件缓存 + 向量相似度搜索
+- ManManBuy Scraper: httpx 抓取 + BeautifulSoup 解析
+- AI Filter: LLM 去重、排序、过滤搜索结果
+"""
+
+import json
+import time
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from urllib.parse import quote
+
+import httpx
+from bs4 import BeautifulSoup
+
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.star import Context, Star, register
+from astrbot.api import logger, AstrBotConfig
+
+# 默认 User-Agent，模拟浏览器访问
+DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+@dataclass
+class PriceResult:
+    """商品价格搜索结果数据类
+
+    Attributes:
+        title: 商品标题
+        price: 商品价格（如 "¥99.00"）
+        store: 来源商城名称（如 "京东"、"淘宝"）
+        url: 商品详情页链接
+        source: 数据来源（固定为 "ManManBuy"）
+        history_low: 历史最低价（可选，爬虫未提供时为空）
+    """
+    title: str
+    price: str
+    store: str
+    url: str
+    source: str
+    history_low: str = ""
+
+
+@dataclass
+class CacheEntry:
+    """缓存条目数据类，存储一次搜索的完整结果
+
+    Attributes:
+        query: 搜索关键词
+        timestamp: 缓存时间戳（epoch 秒）
+        manmanbuy_results: 搜索结果列表
+        embedding: 查询的向量嵌入（用于语义相似搜索）
+    """
+    query: str
+    timestamp: float
+    manmanbuy_results: list = field(default_factory=list)
+    embedding: list = field(default_factory=list)
+
+    def to_dict(self):
+        """序列化为字典，用于 JSON 持久化"""
+        return {
+            "query": self.query,
+            "timestamp": self.timestamp,
+            "manmanbuy_results": [asdict(r) for r in self.manmanbuy_results],
+            "embedding": self.embedding,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CacheEntry":
+        """从字典反序列化，用于从 JSON 加载"""
+        return cls(
+            query=d["query"],
+            timestamp=d["timestamp"],
+            manmanbuy_results=[PriceResult(**r) for r in d.get("manmanbuy_results", [])],
+            embedding=d.get("embedding", []),
+        )
+
+
+@dataclass
+class EmbeddingIndex:
+    """向量索引条目，用于快速语义相似搜索
+
+    Attributes:
+        query: 原始搜索关键词
+        vector: 向量嵌入
+        cache_key: 对应的缓存键
+    """
+    query: str
+    vector: list
+    cache_key: str
+
+
+class CacheManager:
+    """缓存管理器，负责搜索结果的持久化和检索
+
+    使用两个 JSON 文件持久化:
+    - cache.json: 搜索结果缓存
+    - embeddings.json: 向量索引（用于语义相似搜索）
+
+    支持功能:
+    - LRU 淘汰策略（按时间戳排序，移除最旧条目）
+    - TTL 过期清理
+    - 向量相似度搜索（余弦相似度）
+    """
+
+    def __init__(self, cache_file: Path, embedding_file: Path):
+        """初始化缓存管理器，从磁盘加载现有缓存
+
+        Args:
+            cache_file: 缓存文件路径
+            embedding_file: 向量索引文件路径
+        """
+        self.cache_file = cache_file
+        self.embedding_file = embedding_file
+        self.entries: dict[str, CacheEntry] = {}  # key -> CacheEntry 映射
+        self.index: list[EmbeddingIndex] = []  # 向量索引列表
+        self._load()
+
+    def _load(self):
+        """从磁盘加载缓存和向量索引
+
+        如果文件不存在或加载失败，静默重置为空状态。
+        """
+        try:
+            if self.cache_file.exists():
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for key, val in data.items():
+                    self.entries[key] = CacheEntry.from_dict(val)
+        except Exception as e:
+            logger.warning(f"Failed to load cache: {e}")
+            self.entries = {}
+
+        try:
+            if self.embedding_file.exists():
+                with open(self.embedding_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.index = [EmbeddingIndex(**item) for item in data]
+        except Exception as e:
+            logger.warning(f"Failed to load embedding index: {e}")
+            self.index = []
+
+    def _save(self):
+        """将缓存和向量索引持久化到磁盘
+
+        使用 ensure_ascii=False 支持中文，indent=2 便于调试。
+        """
+        try:
+            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump({k: v.to_dict() for k, v in self.entries.items()}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+
+        try:
+            self.embedding_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.embedding_file, "w", encoding="utf-8") as f:
+                json.dump([asdict(item) for item in self.index], f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save embedding index: {e}")
+
+    def get(self, key: str) -> CacheEntry | None:
+        """按精确键获取缓存条目"""
+        return self.entries.get(key)
+
+    def get_by_key(self, key: str) -> CacheEntry | None:
+        """按精确键获取缓存条目（与 get 方法相同，保留用于向量搜索回调）"""
+        return self.entries.get(key)
+
+    async def put(self, key: str, entry: CacheEntry, embedding: list | None = None, max_entries: int = -1):
+        """存储缓存条目
+
+        Args:
+            key: 缓存键（搜索关键词）
+            entry: 缓存条目
+            embedding: 向量嵌入（可选，用于语义搜索）
+            max_entries: 最大缓存条目数（-1 表示不限制）
+        """
+        # 如果提供了向量，更新向量索引
+        if embedding:
+            entry.embedding = embedding
+            # 移除旧的索引条目，添加新的
+            self.index = [idx for idx in self.index if idx.cache_key != key]
+            self.index.append(EmbeddingIndex(query=key, vector=embedding, cache_key=key))
+
+        self.entries[key] = entry
+
+        # LRU 淘汰：超过容量时移除最旧的条目
+        if max_entries > 0 and len(self.entries) > max_entries:
+            sorted_keys = sorted(self.entries.keys(), key=lambda k: self.entries[k].timestamp)
+            while len(self.entries) > max_entries:
+                old_key = sorted_keys.pop(0)
+                self.entries.pop(old_key, None)
+                # 同时移除对应的向量索引
+                self.index = [idx for idx in self.index if idx.cache_key != old_key]
+
+        self._save()
+
+    async def search_similar(self, query: str, query_vec: list, threshold: float) -> CacheEntry | None:
+        """通过向量相似度搜索缓存
+
+        使用暴力线性扫描计算余弦相似度，返回超过阈值的最佳匹配。
+
+        Args:
+            query: 原始查询（用于返回结果）
+            query_vec: 查询的向量嵌入
+            threshold: 相似度阈值（0-1），超过此值视为匹配
+
+        Returns:
+            最匹配的缓存条目，无匹配返回 None
+        """
+        if not self.index or not query_vec:
+            return None
+
+        best_score = 0.0
+        best_key = None
+        for entry in self.index:
+            if not entry.vector:
+                continue
+            score = _cosine_similarity(query_vec, entry.vector)
+            if score > best_score:
+                best_score = score
+                best_key = entry.cache_key
+
+        if best_score >= threshold and best_key:
+            return self.get_by_key(best_key)
+        return None
+
+    def cleanup_expired(self, ttl_days: int):
+        """清理过期的缓存条目
+
+        Args:
+            ttl_days: 过期天数（0 表示永不过期）
+        """
+        if ttl_days <= 0:
+            return
+        ttl_seconds = ttl_days * 86400  # 86400 = 24 * 60 * 60（秒/天）
+        now = time.time()
+        expired_keys = [k for k, v in self.entries.items() if (now - v.timestamp) > ttl_seconds]
+        for key in expired_keys:
+            self.entries.pop(key, None)
+            self.index = [idx for idx in self.index if idx.cache_key != key]
+        if expired_keys:
+            self._save()
+            logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+
+def _cosine_similarity(a: list, b: list) -> float:
+    """计算两个向量的余弦相似度
+
+    使用纯 Python 实现，无需 numpy 依赖。
+    处理零向量情况，返回 0.0。
+
+    Args:
+        a: 向量 A
+        b: 向量 B（长度需与 A 相同）
+
+    Returns:
+        余弦相似度（-1 到 1）
+    """
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+@register("pricefinder", "past_windXF", "搜索慢慢买商品比价信息", "1.0.0")
+class PriceFinderPlugin(Star):
+    """PriceFinder 插件主类
+
+    提供商品比价搜索功能，支持:
+    - 命令行搜索: /price search <关键词>
+    - LLM Tool: AI 可自主调用 search_prices 工具
+    """
+
+    def __init__(self, context: Context, config: AstrBotConfig):
+        """初始化插件
+
+        Args:
+            context: AstrBot 上下文，用于访问 LLM 提供商
+            config: 插件配置
+        """
         super().__init__(context)
+        self.config = config
+        self.client: httpx.AsyncClient | None = None  # HTTP 客户端
+        self.cache: CacheManager | None = None  # 缓存管理器
 
     async def initialize(self):
-        """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        """初始化插件资源
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
-    @filter.command("helloworld")
-    async def helloworld(self, event: AstrMessageEvent):
-        """这是一个 hello world 指令""" # 这是 handler 的描述，将会被解析方便用户了解插件内容。建议填写。
-        user_name = event.get_sender_name()
-        message_str = event.message_str # 用户发的纯文本消息字符串
-        message_chain = event.get_messages() # 用户所发的消息的消息链 # from astrbot.api.message_components import *
-        logger.info(message_chain)
-        yield event.plain_result(f"Hello, {user_name}, 你发了 {message_str}!") # 发送一条纯文本消息
+        创建缓存目录，初始化缓存管理器和 HTTP 客户端。
+        缓存目录位于 AstrBot 数据目录下的 plugin_data/pricefinder/
+        """
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        cache_dir = Path(get_astrbot_data_path()) / "plugin_data" / self.name
+        self.cache = CacheManager(
+            cache_file=cache_dir / "cache.json",
+            embedding_file=cache_dir / "embeddings.json",
+        )
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.config.get("network_settings", {}).get("timeout", 15)),
+            follow_redirects=True,
+        )
+        logger.info("PriceFinder plugin initialized")
 
     async def terminate(self):
-        """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
+        """清理插件资源，关闭 HTTP 客户端"""
+        if self.client:
+            await self.client.aclose()
+        logger.info("PriceFinder plugin terminated")
+
+    async def _fetch(self, url: str) -> str | None:
+        """发起 HTTP GET 请求
+
+        支持重试机制，构造浏览器请求头以避免反爬。
+
+        Args:
+            url: 目标 URL
+
+        Returns:
+            响应 HTML 文本，失败返回 None
+        """
+        net = self.config.get("network_settings", {})
+        headers = {
+            "User-Agent": net.get("user_agent", DEFAULT_UA),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": url.split("/")[0] + "//" + url.split("/")[2] + "/",  # 构造 Referer 头
+        }
+        retry_count = net.get("retry_count", 2)
+        for attempt in range(retry_count + 1):
+            try:
+                resp = await self.client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    return resp.text
+                logger.warning(f"HTTP {resp.status_code} for {url}")
+            except Exception as e:
+                logger.warning(f"Request failed (attempt {attempt + 1}/{retry_count + 1}): {e}")
+        return None
+
+    async def _get_embedding(self, text: str) -> list | None:
+        """获取文本的向量嵌入
+
+        提供商解析优先级:
+        1. 配置中指定的 embedding_provider ID
+        2. 第一个可用的嵌入提供商
+        3. 无可用提供商则返回 None
+
+        Args:
+            text: 要嵌入的文本
+
+        Returns:
+            向量列表，失败返回 None
+        """
+        provider_id = self.config.get("cache_settings", {}).get("embedding_provider", "")
+        try:
+            if provider_id:
+                provider = self.context.get_provider_by_id(provider_id)
+            else:
+                providers = self.context.get_all_embedding_providers()
+                provider = providers[0] if providers else None
+
+            if provider is None:
+                return None
+
+            embedding = await provider.get_embedding(text)
+            return embedding
+        except Exception as e:
+            logger.warning(f"Embedding failed: {e}")
+            return None
+
+    def _get_llm_provider(self):
+        """获取 LLM 提供商
+
+        提供商解析优先级:
+        1. 配置中指定的 ai_filter_provider ID
+        2. AstrBot 当前使用的提供商
+        3. 无可用提供商则返回 None
+
+        Returns:
+            LLM 提供商实例，无可用返回 None
+        """
+        provider_id = self.config.get("ai_filter_settings", {}).get("ai_filter_provider", "")
+        try:
+            if provider_id:
+                return self.context.get_provider_by_id(provider_id)
+            return self.context.get_using_provider()
+        except Exception:
+            return None
+
+    def _is_expired(self, entry: CacheEntry) -> bool:
+        """检查缓存条目是否过期
+
+        Args:
+            entry: 缓存条目
+
+        Returns:
+            True 表示已过期或永不过期（ttl_days <= 0）
+        """
+        ttl_days = self.config.get("cache_settings", {}).get("cache_ttl_days", 1)
+        if ttl_days <= 0:
+            return False  # ttl_days <= 0 表示永不过期
+        ttl_seconds = ttl_days * 86400  # 86400 = 24 * 60 * 60（秒/天）
+        return (time.time() - entry.timestamp) > ttl_seconds
+
+    async def has_query(self, keyword: str) -> tuple:
+        """检查缓存中是否存在有效的搜索结果
+
+        两级查找策略:
+        1. 精确匹配: 直接按关键词查找
+        2. 向量相似搜索: 通过嵌入向量查找语义相似的缓存
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            (是否存在有效缓存, 缓存条目或 None)
+        """
+        exact = self.cache.get(keyword)
+        if exact and not self._is_expired(exact):
+            return True, exact
+
+        cache_cfg = self.config.get("cache_settings", {})
+        if cache_cfg.get("vector_search_enabled", True):
+            query_vec = await self._get_embedding(keyword)
+            if query_vec:
+                threshold = cache_cfg.get("vector_similarity_threshold", 0.85)  # 0.85 = 默认相似度阈值
+                similar = await self.cache.search_similar(keyword, query_vec, threshold)
+                if similar and not self._is_expired(similar):
+                    return True, similar
+
+        return False, None
+
+    async def _search_manmanbuy(self, keyword: str) -> list:
+        """从慢慢买网站抓取商品比价信息
+
+        使用 CSS 选择器解析 HTML，提取商品标题、价格、商城、链接。
+        选择器类名可能随网站更新变化，需注意维护。
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            PriceResult 列表
+        """
+        url = f"https://s.manmanbuy.com/pc/search/result?c=discount&keyword={quote(keyword)}"
+        html = await self._fetch(url)
+        if not html:
+            return []
+
+        soup = BeautifulSoup(html, "lxml")
+        results = []
+        max_results = self.config.get("search_settings", {}).get("max_results", 5)
+
+        for item in soup.select(".DiscountItemPC_box__m9G3M")[:max_results]:
+            try:
+                title_el = item.select_one(".DiscountItemPC_itemTitle__hlI5m a")
+                if not title_el:
+                    continue
+                title = title_el.get_text(strip=True)
+                href = title_el.get("href", "")
+                # 处理相对链接，补全为完整 URL
+                if not href.startswith("http"):
+                    href = "https://cu.manmanbuy.com" + href
+
+                price_el = item.select_one(".DiscountItemPC_itemSubTitle__rWgWK a")
+                price = price_el.get_text(strip=True) if price_el else ""
+
+                store_el = item.select_one(".DiscountItemPC_itemMall__R8PlE")
+                store = store_el.get_text(strip=True) if store_el else ""
+
+                results.append(PriceResult(
+                    title=title,
+                    price=price,
+                    store=store,
+                    url=href,
+                    source="ManManBuy",
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to parse ManManBuy item: {e}")
+                continue
+
+        return results
+
+    async def _ai_filter_results(self, results: list, keyword: str) -> list:
+        """使用 LLM 对搜索结果进行智能过滤
+
+        功能:
+        - 去除重复或高度相似的商品
+        - 按价格从低到高排序
+        - 移除明显不相关的结果
+        - 识别特别好的优惠
+
+        输入会被截断到 ai_filter_max_input 字符以控制成本。
+
+        Args:
+            results: 原始搜索结果列表
+            keyword: 搜索关键词
+
+        Returns:
+            过滤后的结果列表，失败返回原始结果
+        """
+        ai_cfg = self.config.get("ai_filter_settings", {})
+        if not ai_cfg.get("ai_filter_enabled", True):
+            return results
+        if not results:
+            return results
+
+        provider = self._get_llm_provider()
+        if provider is None:
+            logger.info("AI filter skipped: no LLM provider available")
+            return results
+
+        # 截断输入以控制 token 消耗
+        max_input = ai_cfg.get("ai_filter_max_input", 3000)
+        input_text = self._results_to_text(results, keyword)[:max_input]
+
+        # 构造 LLM 提示词，要求结构化输出
+        prompt = f"""你是一个商品价格分析助手。请对以下搜索结果进行分析和过滤。
+
+搜索关键词: {keyword}
+
+原始搜索结果:
+{input_text}
+
+请完成以下任务:
+1. 去除重复或高度相似的商品
+2. 按价格从低到高排序（同款商品取最低价）
+3. 移除明显不相关的结果
+4. 为每个结果保留: 标题、价格、来源平台、链接
+5. 如果有特别好的优惠，在第一个结果前加一行推荐说明
+
+输出格式（每行一个结果）:
+标题 | 价格 | 平台 | 链接
+"""
+
+        try:
+            response = await provider.text_chat(
+                prompt=prompt,
+                system_prompt="你是一个精确的价格分析助手，只输出过滤后的结果列表，不要输出其他内容。",
+            )
+            filtered = self._parse_ai_response(response.completion_text, results)
+            if filtered:
+                logger.info(f"AI filter: {len(results)} -> {len(filtered)} results")
+                return filtered
+        except Exception as e:
+            logger.warning(f"AI filter failed, using raw results: {e}")
+
+        return results
+
+    def _results_to_text(self, results: list, keyword: str) -> str:
+        """将搜索结果序列化为文本格式供 LLM 处理
+
+        格式: "序号. 标题 | 价格 | 商城 | 链接 | 历史低价:xxx"
+
+        Args:
+            results: 搜索结果列表
+            keyword: 搜索关键词
+
+        Returns:
+            格式化的文本字符串
+        """
+        lines = []
+        for i, r in enumerate(results, 1):
+            line = f"{i}. {r.title} | {r.price} | {r.store} | {r.url}"
+            if r.history_low:
+                line += f" | 历史低价:{r.history_low}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _parse_ai_response(self, ai_text: str, original: list) -> list | None:
+        """解析 LLM 返回的过滤结果
+
+        通过 URL 匹配将 LLM 输出还原为原始 PriceResult 对象。
+        LLM 可能修改标题或格式，但 URL 是唯一可靠标识。
+
+        Args:
+            ai_text: LLM 返回的文本
+            original: 原始搜索结果列表
+
+        Returns:
+            过滤后的 PriceResult 列表，解析失败返回 None
+        """
+        url_map = {r.url: r for r in original}
+        filtered = []
+        for line in ai_text.strip().split("\n"):
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) >= 4:
+                url = parts[3]  # 第四部分是 URL
+                if url in url_map:
+                    filtered.append(url_map[url])
+        return filtered if filtered else None
+
+    def _format_output(self, results: CacheEntry, keyword: str) -> str:
+        """格式化命令搜索的输出
+
+        根据缓存新鲜度显示不同提示:
+        - 新鲜缓存: 显示缓存时间
+        - 过期缓存: 显示过期天数并提示正在重新搜索
+
+        Args:
+            results: 缓存条目（包含搜索结果和时间戳）
+            keyword: 搜索关键词
+
+        Returns:
+            格式化的输出文本
+        """
+        cache_age_days = (time.time() - results.timestamp) / 86400  # 86400 = 秒/天
+        ttl_days = self.config.get("cache_settings", {}).get("cache_ttl_days", 1)
+        is_fresh = ttl_days <= 0 or cache_age_days <= ttl_days
+
+        from datetime import datetime
+        cache_time = datetime.fromtimestamp(results.timestamp).strftime("%Y-%m-%d %H:%M")
+
+        if is_fresh:
+            header = f'🔍 搜索 "{keyword}" 的价格结果\n📅 缓存时间: {cache_time} (有效期内)\n'
+        else:
+            header = f'🔍 搜索 "{keyword}" 的价格结果\n⚠️ 缓存已过期({cache_age_days:.0f}天前)，正在重新搜索...\n'
+
+        lines = [header]
+
+        if results.manmanbuy_results:
+            for i, r in enumerate(results.manmanbuy_results, 1):
+                lines.append(f"{i}. {r.title}")
+                price_line = f"   💰 {r.price}"
+                if r.store:
+                    price_line += f" | 🏪 {r.store}"
+                lines.append(price_line)
+                if r.history_low:
+                    lines.append(f"   📉 历史低价: {r.history_low}")
+                lines.append(f"   🔗 {r.url}")
+            lines.append("")
+        else:
+            return f'🔍 搜索 "{keyword}" 未找到相关商品'
+
+        return "\n".join(lines)
+
+    async def _do_search(self, keyword: str) -> CacheEntry:
+        """执行搜索的主流程
+
+        流程: 检查缓存 → 未命中则爬取 → 写入缓存 → 返回结果
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            搜索结果缓存条目
+        """
+        has_cache, cached = await self.has_query(keyword)
+        if has_cache and cached:
+            cache_age_days = (time.time() - cached.timestamp) / 86400
+            logger.info(f"Cache hit for '{keyword}' (age: {cache_age_days:.1f} days)")
+            return cached
+
+        # 缓存未命中，执行爬取
+        manmanbuy_results = await self._search_manmanbuy(keyword)
+
+        results = CacheEntry(
+            query=keyword,
+            timestamp=time.time(),
+            manmanbuy_results=manmanbuy_results,
+        )
+
+        # 写入缓存（如果启用）
+        cache_cfg = self.config.get("cache_settings", {})
+        if cache_cfg.get("cache_enabled", True):
+            embedding = await self._get_embedding(keyword)
+            max_entries = cache_cfg.get("cache_max_entries", -1)
+            await self.cache.put(keyword, results, embedding, max_entries)
+
+        return results
+
+    @filter.command_group("price")
+    def price(self):
+        """价格搜索命令组入口"""
+        pass
+
+    @price.command("search")
+    async def price_search(self, event: AstrMessageEvent, keyword: str = ""):
+        """搜索慢慢买商品比价信息
+
+        使用方式: /price search <关键词>
+
+        Args:
+            keyword: 搜索关键词
+        """
+        if not keyword:
+            yield event.plain_result("用法: /price search <关键词>\n示例: /price search iPhone 16")
+            return
+
+        results = await self._do_search(keyword)
+        all_results = results.manmanbuy_results
+        all_results = await self._ai_filter_results(all_results, keyword)
+
+        if all_results:
+            output = self._format_output(results, keyword)
+        else:
+            output = f'🔍 搜索 "{keyword}" 未找到相关商品'
+
+        yield event.plain_result(output)
+
+    def _format_tool_output(self, results: list, keyword: str) -> str:
+        """格式化 LLM Tool 的输出
+
+        输出原始数据格式，由主 LLM 进行自然语言总结。
+
+        Args:
+            results: 过滤后的搜索结果列表
+            keyword: 搜索关键词
+
+        Returns:
+            格式化的输出文本
+        """
+        lines = []
+        for i, r in enumerate(results, 1):
+            line = f"{i}. {r.title}"
+            if r.price:
+                line += f" | {r.price}"
+            if r.store:
+                line += f" | {r.store}"
+            if r.history_low:
+                line += f" | 历史低价: {r.history_low}"
+            if r.url:
+                line += f" | {r.url}"
+            lines.append(line)
+        return "\n".join(lines)
+
+    @filter.llm_tool(name="search_prices")
+    async def search_prices_tool(self, event: AstrMessageEvent, keyword: str):
+        """搜索商品价格信息
+
+        AI 自主调用的工具，从慢慢买抓取比价数据，
+        经过 AI 过滤后返回精简的结果列表供主 LLM 分析和总结。
+
+        Args:
+            keyword(string): 商品关键词，如 "iPhone 16"、"机械键盘"、"显卡"
+        """
+        results = await self._do_search(keyword)
+        all_results = results.manmanbuy_results
+        all_results = await self._ai_filter_results(all_results, keyword)
+
+        if not all_results:
+            return f"搜索 \"{keyword}\" 未找到相关商品，请尝试其他关键词。"
+
+        output = self._format_tool_output(all_results, keyword)
+        return output

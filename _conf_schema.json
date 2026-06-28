@@ -1,0 +1,105 @@
+{
+    "search_settings": {
+        "description": "搜索设置",
+        "hint": "控制搜索行为和结果数量",
+        "type": "object",
+        "items": {
+            "max_results": {
+                "description": "最大返回结果数",
+                "type": "int",
+                "default": 5,
+                "hint": "建议 3-10，太多会刷屏"
+            }
+        }
+    },
+    "network_settings": {
+        "description": "网络设置",
+        "hint": "HTTP 请求参数",
+        "type": "object",
+        "items": {
+            "timeout": {
+                "description": "HTTP 请求超时时间(秒)",
+                "type": "int",
+                "default": 15
+            },
+            "retry_count": {
+                "description": "请求失败重试次数",
+                "type": "int",
+                "default": 2
+            },
+            "user_agent": {
+                "description": "自定义 User-Agent",
+                "type": "string",
+                "hint": "留空使用默认值，修改后可能触发反爬"
+            }
+        }
+    },
+    "cache_settings": {
+        "description": "缓存设置",
+        "hint": "搜索结果缓存与向量语义搜索",
+        "type": "object",
+        "items": {
+            "cache_enabled": {
+                "description": "启用搜索结果缓存",
+                "type": "bool",
+                "default": true,
+                "hint": "缓存相同关键词的搜索结果，避免重复爬取"
+            },
+            "cache_ttl_days": {
+                "description": "缓存有效期(天)",
+                "type": "int",
+                "default": 1,
+                "hint": "超过指定天数后缓存自动失效，需重新爬取"
+            },
+            "cache_max_entries": {
+                "description": "最大缓存条目数",
+                "type": "int",
+                "default": -1,
+                "hint": "-1 表示无限制，设为正数则超出后自动淘汰最旧条目"
+            },
+            "vector_search_enabled": {
+                "description": "启用向量语义搜索",
+                "type": "bool",
+                "default": true,
+                "hint": "即使关键词不完全匹配，也能找到语义相似的缓存"
+            },
+            "vector_similarity_threshold": {
+                "description": "向量相似度阈值",
+                "type": "float",
+                "default": 0.85,
+                "hint": "0-1 之间，越高越严格，建议 0.8-0.9"
+            },
+            "embedding_provider": {
+                "description": "嵌入模型提供商 ID",
+                "type": "string",
+                "hint": "留空自动使用 AstrBot 配置的第一个嵌入提供商，未配置则降级为关键词匹配"
+            }
+        }
+    },
+    "ai_filter_settings": {
+        "description": "AI 过滤设置",
+        "hint": "使用 LLM 对搜索结果去重、排序",
+        "type": "object",
+        "items": {
+            "ai_filter_enabled": {
+                "description": "启用 AI 搜索结果过滤",
+                "type": "bool",
+                "default": true,
+                "hint": "使用 LLM 对搜索结果去重、排序、过滤，提升结果质量"
+            },
+            "ai_filter_provider": {
+                "description": "AI 过滤使用的 LLM 提供商",
+                "type": "string",
+                "hint": "留空使用 AstrBot 当前配置的 LLM 提供商",
+                "_special": "select_provider",
+                "default": ""
+            },
+            "ai_filter_max_input": {
+                "description": "AI 过滤最大输入长度",
+                "type": "int",
+                "default": 3000,
+                "hint": "传给 LLM 的最大文本字符数，避免超长"
+            }
+        }
+    }
+}
