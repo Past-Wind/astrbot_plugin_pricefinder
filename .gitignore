@@ -210,7 +210,7 @@ __marimo__/
 /.mimocode
 /dev_docs
 /example
-/changelog_standard
+/standard
 
 # 不忽略 AGENTS.md
 !AGENTS.md
