@@ -7,7 +7,7 @@ Not a standalone app; no `pyproject.toml`, no tests, no build step, no CI, no li
 
 ## Key files
 
-- `main.py` — entire plugin implementation (~960 lines)
+- `main.py` — entire plugin implementation (~990 lines)
 - `metadata.yaml` — parsed by AstrBot's plugin loader; `name` field includes the `astrbot_plugin_` prefix
 - `_conf_schema.json` — all plugin settings with types, defaults, hints
 - `requirements.txt` — deps: httpx, beautifulsoup4, lxml
@@ -50,8 +50,9 @@ CSS selectors use `DiscountItemPC_*` class names (CSS modules hashes — brittle
 
 ### Data flow
 
-Command: `command → _do_search() → cache check (exact + vector) → HTTP fetch → parse → AI filter → format output`
-WebUI: `app.js → bridge.apiGet("page/search") → /{PLUGIN_NAME}/page/search → CacheManager.get_all_results()`
+Command: `command → _do_search() → cache check (exact + vector) → HTTP fetch → parse → AI filter+structure → cache → format output`
+(LLM filter runs once before caching; subsequent hits return pre-filtered results.)
+WebUI: `app.js → ApiClient.get("search") → /{PLUGIN_NAME}/page/search → CacheManager.get_all_results()`
 
 ## WebUI
 

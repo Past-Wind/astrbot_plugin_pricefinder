@@ -10,23 +10,27 @@ AstrBot 插件，从慢慢买 (ManManBuy) 网站抓取商品比价信息。
 - AI Filter: LLM 去重、排序、过滤搜索结果
 """
 
+# ========== 标准库导入 ==========
 import json
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from urllib.parse import quote
 
-import httpx
-from bs4 import BeautifulSoup
-from quart import jsonify, request
+# ========== 第三方库导入 ==========
+import httpx                          # 异步 HTTP 客户端（爬虫用）
+from bs4 import BeautifulSoup         # HTML 解析器
+from quart import jsonify, request    # Web API 框架（AstrBot 内建）
 
+# ========== AstrBot SDK 导入 ==========
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
 
+# 插件完整名称：AstrBot 通过目录名识别，Web API 路由前缀需要此常量
 PLUGIN_NAME = "astrbot_plugin_pricefinder"
 
-# 默认 User-Agent，模拟浏览器访问
+# 默认 User-Agent，模拟浏览器访问以规避反爬检测
 DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -182,7 +186,9 @@ class CacheManager:
     def _save(self):
         """将缓存和向量索引持久化到磁盘
 
-        使用 ensure_ascii=False 支持中文，indent=2 便于调试。
+        写入两个 JSON 文件：cache.json（搜索结果）和 embeddings.json（向量索引）。
+        使用 ensure_ascii=False 支持中文，indent=2 便于人工调试。
+        失败时仅警告，不抛出异常——缓存写入失败不应打断搜索主流程。
         """
         try:
             self.cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -407,19 +413,23 @@ class CacheManager:
 def _cosine_similarity(a: list, b: list) -> float:
     """计算两个向量的余弦相似度
 
-    使用纯 Python 实现，无需 numpy 依赖。
-    处理零向量情况，返回 0.0。
+    纯 Python 实现（无 numpy 依赖），适合插件运行时环境。
+    公式：cos(θ) = (A·B) / (||A|| × ||B||)
 
     Args:
-        a: 向量 A
+        a: 向量 A（浮点数列表）
         b: 向量 B（长度需与 A 相同）
 
     Returns:
-        余弦相似度（-1 到 1）
+        余弦相似度（-1 到 1，越接近 1 越相似）
+        任一向量为零向量时返回 0.0（视为无相似性）
     """
+    # 点积：A·B = Σ(a[i] × b[i])
     dot = sum(x * y for x, y in zip(a, b))
+    # L2 范数：||A|| = √(Σ a[i]²)
     norm_a = sum(x * x for x in a) ** 0.5
     norm_b = sum(x * x for x in b) ** 0.5
+    # 零向量保护
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
@@ -597,7 +607,8 @@ class PriceFinderPlugin(Star):
         """从慢慢买网站抓取商品比价信息
 
         使用 CSS 选择器解析 HTML，提取商品标题、价格、商城、链接。
-        选择器类名可能随网站更新变化，需注意维护。
+        ⚠️ CSS 选择器依赖 React CSS Modules 生成的哈希类名
+        （如 .DiscountItemPC_itemTitle__hlI5m），网站重构后可能失效。
 
         Args:
             keyword: 搜索关键词
@@ -605,6 +616,7 @@ class PriceFinderPlugin(Star):
         Returns:
             PriceResult 列表
         """
+        # 构造搜索 URL：c=discount 表示按折扣排序
         url = f"https://s.manmanbuy.com/pc/search/result?c=discount&keyword={quote(keyword)}"
         html = await self._fetch(url)
         if not html:
@@ -614,6 +626,7 @@ class PriceFinderPlugin(Star):
         results = []
         max_results = self.config.get("search_settings", {}).get("max_results", 5)
 
+        # 遍历搜索结果卡片（每个 .DiscountItemPC_box__m9G3M 是一个商品条目）
         for item in soup.select(".DiscountItemPC_box__m9G3M")[:max_results]:
             try:
                 title_el = item.select_one(".DiscountItemPC_itemTitle__hlI5m a")
@@ -644,14 +657,14 @@ class PriceFinderPlugin(Star):
 
         return results
 
-    async def _ai_filter_results(self, results: list, keyword: str) -> list:
-        """使用 LLM 对搜索结果进行智能过滤
+    async def _ai_filter_and_structure(self, results: list, keyword: str) -> list:
+        """使用 LLM 对搜索结果进行智能过滤和结构化提取
 
         功能:
+        - 移除与关键词语义无关的商品（如搜"iPhone"剔除安卓配件）
         - 去除重复或高度相似的商品
         - 按价格从低到高排序
-        - 移除明显不相关的结果
-        - 识别特别好的优惠
+        - 从标题中提取 品牌方/商品名/详细型号 结构化字段
 
         输入会被截断到 ai_filter_max_input 字符以控制成本。
 
@@ -660,7 +673,7 @@ class PriceFinderPlugin(Star):
             keyword: 搜索关键词
 
         Returns:
-            过滤后的结果列表，失败返回原始结果
+            过滤并结构化后的结果列表，失败返回原始结果
         """
         ai_cfg = self.config.get("ai_filter_settings", {})
         if not ai_cfg.get("ai_filter_enabled", True):
@@ -673,12 +686,10 @@ class PriceFinderPlugin(Star):
             logger.info("AI filter skipped: no LLM provider available")
             return results
 
-        # 截断输入以控制 token 消耗
         max_input = ai_cfg.get("ai_filter_max_input", 3000)
         input_text = self._results_to_text(results, keyword)[:max_input]
 
-        # 构造 LLM 提示词，要求结构化输出
-        prompt = f"""你是一个商品价格分析助手。请对以下搜索结果进行分析和过滤。
+        prompt = f"""你是一个商品价格分析助手。请对以下搜索结果进行分析、过滤和结构化提取。
 
 搜索关键词: {keyword}
 
@@ -686,25 +697,32 @@ class PriceFinderPlugin(Star):
 {input_text}
 
 请完成以下任务:
-1. 去除重复或高度相似的商品
-2. 按价格从低到高排序（同款商品取最低价）
-3. 移除明显不相关的结果
-4. 为每个结果保留: 标题、价格、来源平台、链接
-5. 如果有特别好的优惠，在第一个结果前加一行推荐说明
+1. 剔除与搜索关键词语义完全不相关的结果（如搜索"iPhone"时剔除安卓充电器、手机壳等配件品类）
+2. 去除重复或高度相似的商品（同款不同店铺取最低价一条）
+3. 按价格从低到高排序
+4. 从每个结果的标题中提取: 品牌方、商品名、详细型号
+   - 品牌方: Apple、华为、小米、三星、Sony 等
+   - 商品名: iPhone 16 Pro、Mate 70 Pro 等核心产品名
+   - 型号: 内存/存储/颜色等规格信息（如 "256GB 沙漠金"）
+5. 如果标题无法提取某个字段，该列留空
+6. 过滤后的结果不超过 8 条
 
 输出格式（每行一个结果）:
-标题 | 价格 | 平台 | 链接
+品牌方 | 商品名 | 型号 | 原始标题 | 价格 | 平台 | 链接
+
+示例:
+Apple | iPhone 16 Pro Max | 256GB 沙漠色 | Apple/苹果 iPhone 16 Pro Max 5G全网通 256GB | ¥9999 | 京东 | https://cu.manmanbuy.com/xxx
 """
 
         try:
             response = await provider.text_chat(
                 prompt=prompt,
-                system_prompt="你是一个精确的价格分析助手，只输出过滤后的结果列表，不要输出其他内容。",
+                system_prompt="你是一个精确的价格分析助手。严格按格式输出，每行7个字段用竖线分隔。只输出结果行，不要任何说明文字。",
             )
-            filtered = self._parse_ai_response(response.completion_text, results)
-            if filtered:
-                logger.info(f"AI filter: {len(results)} -> {len(filtered)} results")
-                return filtered
+            structured = self._parse_ai_response_structured(response.completion_text, results)
+            if structured:
+                logger.info(f"AI filter+structure: {len(results)} -> {len(structured)} results")
+                return structured
         except Exception as e:
             logger.warning(f"AI filter failed, using raw results: {e}")
 
@@ -730,30 +748,39 @@ class PriceFinderPlugin(Star):
             lines.append(line)
         return "\n".join(lines)
 
-    def _parse_ai_response(self, ai_text: str, original: list) -> list | None:
-        """解析 LLM 返回的过滤结果
+    def _parse_ai_response_structured(self, ai_text: str, original: list) -> list | None:
+        """解析 LLM 返回的过滤+结构化结果
 
-        通过 URL 匹配将 LLM 输出还原为原始 PriceResult 对象。
-        LLM 可能修改标题或格式，但 URL 是唯一可靠标识。
+        输出格式: 品牌方 | 商品名 | 型号 | 原始标题 | 价格 | 平台 | 链接
+        URL 在最后一列，通过 URL 匹配回原始 PriceResult 并回写结构化字段。
 
         Args:
             ai_text: LLM 返回的文本
             original: 原始搜索结果列表
 
         Returns:
-            过滤后的 PriceResult 列表，解析失败返回 None
+            过滤并结构化后的 PriceResult 列表，解析失败返回 None
         """
         url_map = {r.url: r for r in original}
+        seen = set()
         filtered = []
         for line in ai_text.strip().split("\n"):
             line = line.strip()
             if not line or "|" not in line:
                 continue
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) >= 4:
-                url = parts[3]  # 第四部分是 URL
-                if url in url_map:
-                    filtered.append(url_map[url])
+            if len(parts) < 4:
+                continue
+            url = parts[-1]  # URL 始终在最后一列
+            if url not in url_map or url in seen:
+                continue
+            seen.add(url)
+            result = url_map[url]
+            if len(parts) >= 7:
+                result.brand = parts[0]
+                result.product_name = parts[1]
+                result.model = parts[2]
+            filtered.append(result)
         return filtered if filtered else None
 
     def _format_output(self, results: CacheEntry, keyword: str) -> str:
@@ -803,34 +830,44 @@ class PriceFinderPlugin(Star):
     async def _do_search(self, keyword: str, user_id: str = "") -> CacheEntry:
         """执行搜索的主流程
 
-        流程: 检查缓存 → 未命中则爬取 → 写入缓存 → 返回结果
+        流程:
+        1. 检查缓存（精确匹配 + 向量语义匹配）
+        2. 命中 → 直接返回已过滤的缓存
+        3. 未命中 → 爬取慢慢买 → AI 过滤+结构化 → 写入缓存 → 返回
+        LLM 过滤只在首次爬取时执行一次，后续命中缓存零 LLM 消耗。
 
         Args:
             keyword: 搜索关键词
             user_id: 查价用户 ID
 
         Returns:
-            搜索结果缓存条目
+            搜索结果缓存条目（已过滤+结构化）
         """
+        # 全局查询计数器 +1
         self.cache.increment_query()
 
+        # 步骤 1&2：尝试从缓存获取
         has_cache, cached = await self.has_query(keyword)
         if has_cache and cached:
             cache_age_days = (time.time() - cached.timestamp) / 86400
             logger.info(f"Cache hit for '{keyword}' (age: {cache_age_days:.1f} days)")
             return cached
 
-        # 缓存未命中，执行爬取
+        # 步骤 3a：缓存未命中 → 爬取慢慢买原始数据
         manmanbuy_results = await self._search_manmanbuy(keyword)
 
+        # 步骤 3b：LLM 过滤无关结果 + 提取品牌/商品名/型号
+        filtered_results = await self._ai_filter_and_structure(manmanbuy_results, keyword)
+
+        # 步骤 3c：构造缓存条目（用户 ID 关联此次查询）
         results = CacheEntry(
             query=keyword,
             user_id=user_id,
             timestamp=time.time(),
-            manmanbuy_results=manmanbuy_results,
+            manmanbuy_results=filtered_results,
         )
 
-        # 写入缓存（如果启用）
+        # 步骤 3d：持久化到缓存 JSON + 向量索引
         cache_cfg = self.config.get("cache_settings", {})
         if cache_cfg.get("cache_enabled", True):
             embedding = await self._get_embedding(keyword)
@@ -840,7 +877,16 @@ class PriceFinderPlugin(Star):
         return results
 
     def _register_web_api(self):
-        """注册 WebUI 页面所需的 API 路由"""
+        """注册 WebUI 页面所需的 API 路由
+
+        前端通过 bridge.apiGet("page/stats") 调用，
+        Dashboard 转发到 /api/plug/{PLUGIN_NAME}/page/stats
+
+        三个端点：
+        - /page/stats   → 仪表盘指标（总条目、查询次数、活跃用户）
+        - /page/search  → 按条件搜索缓存结果（支持 keyword/price_source/time_range）
+        - /page/filters → 返回筛选器可选项（品牌、来源等去重列表）
+        """
         self.context.register_web_api(
             f"/{PLUGIN_NAME}/page/stats",
             self._page_stats,
@@ -867,15 +913,23 @@ class PriceFinderPlugin(Star):
         return jsonify(self.cache.get_stats())
 
     async def _page_search(self):
-        """按条件搜索缓存结果"""
+        """按条件搜索缓存结果
+
+        Query 参数：
+        - keyword:      搜索关键词（模糊匹配品牌/商品名/型号等）
+        - price_source: 按价格来源精确筛选（如 "京东"）
+        - time_range:   时间范围（today / 7d / 30d / all）
+        """
         if self.cache is None:
             return jsonify([])
 
+        # 读取 request query 参数
         filters = {}
         keyword = (request.args.get("keyword") or "").strip()
         price_source = (request.args.get("price_source") or "").strip()
         time_range = (request.args.get("time_range") or "").strip()
 
+        # 关键词和价格来源传给 CacheManager 的文本匹配
         if keyword:
             filters["keyword"] = keyword
         if price_source:
@@ -883,6 +937,8 @@ class PriceFinderPlugin(Star):
 
         results = self.cache.get_all_results(filters)
 
+        # 时间范围：CacheManager 未内置此筛选，在后端手动过滤
+        # 86400 = 每天秒数，604800 = 7天，2592000 = 30天
         if time_range and time_range != "all":
             now = time.time()
             ranges = {"today": 86400, "7d": 604800, "30d": 2592000}
@@ -918,7 +974,6 @@ class PriceFinderPlugin(Star):
         user_id = event.get_sender_id()
         results = await self._do_search(keyword, user_id)
         all_results = results.manmanbuy_results
-        all_results = await self._ai_filter_results(all_results, keyword)
 
         if all_results:
             output = self._format_output(results, keyword)
@@ -966,7 +1021,6 @@ class PriceFinderPlugin(Star):
         user_id = event.get_sender_id()
         results = await self._do_search(keyword, user_id)
         all_results = results.manmanbuy_results
-        all_results = await self._ai_filter_results(all_results, keyword)
 
         if not all_results:
             return f"搜索 \"{keyword}\" 未找到相关商品，请尝试其他关键词。"

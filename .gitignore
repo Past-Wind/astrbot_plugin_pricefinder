@@ -213,6 +213,8 @@ __marimo__/
 /standard
 /doc
 /test
+/astrbot_plugin_pricefinder.zip
+/old
 
 # 不忽略 AGENTS.md
 !AGENTS.md

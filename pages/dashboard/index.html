@@ -1,102 +1,85 @@
-<!DOCTYPE html>
+<!doctype html>
+<!--
+  PriceFinder WebUI — 商品比价仪表盘
+  遵循 AstrBot 插件 Pages 规范，由 Dashboard 通过 iframe 嵌入。
+  Bridge: window.AstrBotPluginPage 提供 API 通信和主题/语言同步。
+  入口脚本: app.js（ES module）
+-->
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PriceFinder</title>
-<link rel="stylesheet" href="./style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PriceFinder</title>
+  <!-- 外部样式表：遵循 AstrBot 相对路径规范 -->
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
 
-<div class="header">
-  <span class="logo">&#9670; PriceFinder</span>
+<!-- ====== 顶部导航栏 ====== -->
+<header class="header">
+  <!-- 左侧：logo + 标题 -->
+  <div class="header-title">
+    <!-- 插件 logo 图片，相对路径指向项目根目录的 logo.png -->
+    <img class="logo" src="../../logo.png" alt="PriceFinder" />
+    PriceFinder 商品比价
+  </div>
+  <!-- 右侧：主题切换按钮（JS 控制文字和主题状态） -->
+  <button class="theme-toggle" id="themeBtn">🌙 暗色模式</button>
+</header>
+
+<!-- ====== 仪表盘指标卡片区 ====== -->
+<!-- 由 app.js renderStats() 动态渲染四个指标卡片 -->
+<section class="stats-row" id="statsRow"></section>
+
+<!-- ====== 搜索栏 ====== -->
+<!-- 全宽输入框 + 内嵌清除/搜索按钮 -->
+<div class="search-bar">
+  <div class="search-input-wrap">
+    <input type="text" id="searchInput" placeholder="搜索关键词、品牌、商品名..." />
+    <!-- ✕ 清除按钮：输入框有内容时才显示 -->
+    <button class="btn-reset" id="btnReset" title="清除">✕</button>
+    <!-- 🔍 搜索按钮 -->
+    <button class="btn-search" id="btnSearch" title="搜索">🔍</button>
+  </div>
 </div>
 
-<div class="layout">
+<!-- ====== 主体内容区（侧边栏 + 表格） ====== -->
+<div class="main-grid">
 
-<aside class="sidebar" id="sidebar">
-  <div class="sidebar-section">
-    <span class="sidebar-label">品牌方</span>
-    <div id="filter-brand"></div>
-  </div>
-  <div class="sidebar-section">
-    <span class="sidebar-label">售价来源</span>
-    <div id="filter-price-source"></div>
-  </div>
-  <div class="sidebar-section">
-    <span class="sidebar-label">查价来源</span>
-    <div id="filter-query-source"></div>
-  </div>
-  <div class="sidebar-section">
-    <span class="sidebar-label">时间范围</span>
-    <select class="filter-select" id="filterTimeRange">
-      <option value="all">全部时间</option>
-      <option value="today">今天</option>
-      <option value="7d">近 7 天</option>
-      <option value="30d">近 30 天</option>
-    </select>
-  </div>
-</aside>
+  <!-- 左侧：筛选器侧边栏 -->
+  <!-- 由 app.js renderSidebar() 动态渲染筛选分组 -->
+  <aside class="sidebar" id="sidebar"></aside>
 
-<div class="main">
-
-  <div class="metrics">
-    <div class="metric-card accent">
-      <div class="metric-label">总缓存条目</div>
-      <div class="metric-value" id="metricEntries">-</div>
+  <!-- 右侧：数据表格区域 -->
+  <div class="table-area">
+    <!-- 表格工具栏：显示记录总数 -->
+    <div class="table-toolbar">
+      <span class="table-info" id="tableInfo">共 <strong>0</strong> 条记录</span>
     </div>
-    <div class="metric-card">
-      <div class="metric-label">总查询次数</div>
-      <div class="metric-value" id="metricQueries">-</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">今日查询</div>
-      <div class="metric-value" id="metricToday">-</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">活跃用户数</div>
-      <div class="metric-value" id="metricUsers">-</div>
-    </div>
-  </div>
-
-  <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="搜索关键词、品牌、型号...">
-    <select id="searchSource">
-      <option value="">全部来源</option>
-    </select>
-    <button class="btn btn-primary" id="btnSearch">&#128269; 搜索</button>
-    <button class="btn btn-secondary" id="btnReset">&#8634; 重置</button>
-  </div>
-
-  <div class="content">
-    <div class="content-header">
-      共 <span class="result-count" id="resultCount">-</span> 条结果
-      <span class="clear-filters" id="clearFilters">清除所有筛选</span>
-    </div>
-    <div class="table-wrap">
+    <!-- 表格水平滚动容器 -->
+    <div class="table-scroll">
       <table>
-        <thead>
-          <tr>
-            <th style="width:40px">#</th>
-            <th class="sortable" data-sort="brand">品牌方</th>
-            <th class="sortable" data-sort="product_name">商品名</th>
-            <th class="sortable" data-sort="model">型号</th>
-            <th class="sortable" data-sort="price" style="text-align:right">售价</th>
-            <th class="sortable" data-sort="price_source">售价来源</th>
-            <th class="sortable" data-sort="query_source">查价来源</th>
-            <th class="sortable" data-sort="user_id">查价用户</th>
-            <th class="sortable" data-sort="timestamp">时间</th>
-            <th style="width:40px"></th>
-          </tr>
-        </thead>
+        <!-- 表头：由 app.js renderTableHead() 动态生成 -->
+        <thead id="tableHead"></thead>
+        <!-- 表体：由 app.js renderTableBody() 动态生成 -->
         <tbody id="tableBody"></tbody>
       </table>
     </div>
+    <!-- 分页栏：页码 + 每页条数选择器 + 翻页按钮 -->
     <div class="pagination" id="pagination"></div>
   </div>
-</div>
+
 </div>
 
+<!-- ====== Toast 通知浮层 ====== -->
+<!-- 由 app.js showToast() 控制显示/隐藏 -->
+<div class="toast" id="toast"></div>
+
+<!--
+  入口脚本：使用 type="module" 确保 ES module 语法可用。
+  AstrBot 会自动注入 bridge-sdk.js 提供 window.AstrBotPluginPage。
+-->
 <script type="module" src="./app.js"></script>
+
 </body>
 </html>

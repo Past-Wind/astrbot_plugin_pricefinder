@@ -1,268 +1,651 @@
 /* ================================================================
-   PriceFinder WebUI - Design System
+   PriceFinder WebUI — 主题与样式系统
+   ================================================================
+   设计理念：
+   - 采用 CSS 自定义属性（--xxx）统一管理颜色/间距/圆角
+   - 通过 [data-theme="dark"] 切换暗色主题，所有组件自动适配
+   - 不依赖第三方框架，纯 CSS 实现
    ================================================================ */
+
+/* ---- 设计令牌：亮色主题 ---- */
 :root {
-  --bg-app: #f8f9fa;
-  --bg-sidebar: #f1f3f5;
-  --bg-card: #ffffff;
-  --bg-hover: #f1f3f5;
-  --bg-active: #e9ecef;
-  --bg-input: #f1f3f5;
-  --border-light: #e9ecef;
-  --border-normal: #dee2e6;
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
-  --text-tertiary: #adb5bd;
-  --accent: #4c6ef5;
-  --accent-light: #edf2ff;
-  --accent-hover: #3b5bdb;
-  --success: #2b8a3e;
-  --success-light: #ebfbee;
-  --warning: #e67700;
-  --warning-light: #fff4e6;
-  --danger: #c92a2a;
-  --danger-light: #fff5f5;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-full: 9999px;
-  --shadow-xs: 0 1px 2px rgba(0,0,0,0.03);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04),0 1px 2px rgba(0,0,0,0.02);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
-  --sidebar-width: 220px;
-  --header-height: 48px;
-  --transition-fast: 120ms ease;
-  box-sizing: border-box;
+  /* 背景色：页面底色 / 卡片底色 / hover 状态底色 */
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface-hover: #f0f1f5;
+
+  /* 边框色 */
+  --border: #e4e6eb;
+
+  /* 文字色：主文字 / 次要文字 / 模糊文字 */
+  --text: #1a1a2e;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+
+  /* 品牌色（靛蓝系）：主色 / hover / 浅底色 */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-light: #eef2ff;
+
+  /* 语义色：成功（绿）/ 警告（橙）/ 信息（蓝）/ 错误（红） */
+  --success: #059669;
+  --success-light: #ecfdf5;
+  --warning: #d97706;
+  --warning-light: #fffbeb;
+  --info: #2563eb;
+  --info-light: #eff6ff;
+  --danger: #dc2626;
+  --danger-light: #fef2f2;
+
+  /* 阴影层级：轻 / 中 / 重 */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --shadow: 0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,.1);
+
+  /* 圆角：通用 / 大圆角 */
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* 布局：侧边栏宽度 */
+  --sidebar-width: 240px;
+
+  /* 过渡动画速度 */
+  --transition: .15s ease;
 }
 
+/* ---- 设计令牌：暗色主题 ---- */
+/* 当 <html> 的 data-theme 属性为 "dark" 时自动生效 */
 [data-theme="dark"] {
-  --bg-app: #1a1b1e;
-  --bg-sidebar: #25262b;
-  --bg-card: #2c2e33;
-  --bg-hover: #373a40;
-  --bg-active: #373a40;
-  --bg-input: #25262b;
-  --border-light: #373a40;
-  --border-normal: #4a4d54;
-  --text-primary: #e9ecef;
-  --text-secondary: #adb5bd;
-  --text-tertiary: #6c757d;
-  --accent: #748ffc;
-  --accent-light: #25262b;
-  --accent-hover: #5c7cfa;
-  --shadow-xs: 0 1px 2px rgba(0,0,0,0.15);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.3);
+  /* 背景色：暗色系，保持层级分隔 */
+  --bg: #101215;
+  --surface: #1c1f2e;
+  --surface-hover: #262a3d;
+
+  /* 边框：必须比表面亮才能可见 */
+  --border: #363b50;
+
+  /* 文字：在暗色背景上需要更亮 */
+  --text: #eaecf0;
+  --text-secondary: #a8b1c0;
+  --text-muted: #838da0;
+
+  /* 品牌色：在暗色背景下更亮以保持对比 */
+  --primary: #818cf8;
+  --primary-hover: #7c7ff6;
+  --primary-light: #2a2670;
+
+  /* 语义色：暗色背景适配 */
+  --success: #34d399;
+  --success-light: #064e3b;
+  --warning: #fbbf24;
+  --warning-light: #78350f;
+  --info: #60a5fa;
+  --info-light: #1e3a5f;
+  --danger: #f87171;
+  --danger-light: #8b2525;
+
+  /* 阴影：暗色背景下需要更深的阴影 */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow: 0 1px 3px rgba(0,0,0,.5);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,.6);
 }
 
-*,*::before,*::after { box-sizing:inherit; margin:0; padding:0; }
+/* ---- 全局重置 ---- */
+/* 统一盒模型 + 清除默认边距 */
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 
-html,body {
-  height:100%; overflow:hidden;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif;
-  font-size:14px; color:var(--text-primary); background:var(--bg-app);
-  -webkit-font-smoothing:antialiased;
+body {
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans SC",sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
 }
 
-/* ---- Header ---- */
+/* ================================================================
+   顶部导航栏（Header）
+   ================================================================ */
 .header {
-  height:var(--header-height);
-  display:flex; align-items:center; gap:16px;
-  padding:0 20px;
-  background:var(--bg-card);
-  border-bottom:1px solid var(--border-light);
-  z-index:10; position:relative;
-}
-.header .logo {
-  font-size:16px; font-weight:700; color:var(--accent);
-  white-space:nowrap;
-}
-
-/* ---- Layout ---- */
-.layout {
-  display:flex; height:calc(100vh - var(--header-height));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow-sm);
+  /* sticky 定位：滚动时固定在页面顶部 */
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-/* ---- Sidebar ---- */
-.sidebar {
-  width:var(--sidebar-width); min-width:var(--sidebar-width);
-  background:var(--bg-sidebar);
-  border-right:1px solid var(--border-light);
-  overflow-y:auto; padding:16px 12px;
-  display:flex; flex-direction:column; gap:16px;
-}
-.sidebar-section { display:flex; flex-direction:column; gap:6px; }
-.sidebar-label {
-  font-size:11px; font-weight:600; color:var(--text-tertiary);
-  text-transform:uppercase; letter-spacing:0.5px;
-  padding:0 4px;
-}
-.filter-item {
-  display:flex; align-items:center; gap:8px;
-  padding:6px 8px; border-radius:var(--radius-sm);
-  cursor:pointer; font-size:13px; color:var(--text-secondary);
-  transition:background var(--transition-fast);
-}
-.filter-item:hover { background:var(--bg-hover); }
-.filter-item.active { background:var(--accent-light); color:var(--accent); font-weight:500; }
-.filter-item input[type="checkbox"] { accent-color:var(--accent); }
-.filter-item .count { margin-left:auto; font-size:11px; color:var(--text-tertiary); }
-.filter-select {
-  padding:6px 8px; border:1px solid var(--border-normal);
-  border-radius:var(--radius-sm); background:var(--bg-input);
-  color:var(--text-primary); font-size:12px; width:100%; outline:none;
+/* 标题区域：logo + 文字 */
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-/* ---- Main ---- */
-.main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+/* 插件 logo 图片（../../logo.png） */
+.header-title .logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  object-fit: contain;
+}
 
-/* ---- Dashboard Metrics ---- */
-.metrics {
-  display:grid; grid-template-columns:repeat(4,1fr); gap:12px;
-  padding:16px 20px; flex-shrink:0;
+/* 主题切换按钮 */
+.theme-toggle {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background var(--transition);
 }
-.metric-card {
-  background:var(--bg-card); border:1px solid var(--border-light);
-  border-radius:var(--radius-lg); padding:16px;
-  box-shadow:var(--shadow-xs);
-}
-.metric-card .metric-label {
-  font-size:12px; color:var(--text-secondary); margin-bottom:6px;
-}
-.metric-card .metric-value {
-  font-size:26px; font-weight:700; color:var(--text-primary);
-}
-.metric-card .metric-change {
-  font-size:11px; margin-top:4px; color:var(--success);
-}
-.metric-card.accent { border-left:3px solid var(--accent); }
-.metric-card .spinner {
-  display:inline-block; width:14px; height:14px; border:2px solid var(--text-tertiary);
-  border-top-color:var(--accent); border-radius:50%; animation:spin 0.6s linear infinite;
-  vertical-align:middle; margin-bottom:6px;
-}
-@keyframes spin { to { transform:rotate(360deg); } }
+.theme-toggle:hover { background: var(--border); }
 
-/* ---- Search Toolbar ---- */
+/* ================================================================
+   仪表盘指标卡片（Stats Row）
+   ================================================================ */
+.stats-row {
+  /* 4 列等宽网格布局 */
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+/* 单个指标卡片 */
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition);
+}
+.stat-card:hover { box-shadow: var(--shadow); }
+
+/* 指标标签（如"缓存总条目"） */
+.stat-card .stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+/* 指标数值（如"128"） */
+.stat-card .stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* 指标图标（卡片右上角的彩色方块） */
+.stat-card .stat-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  float: right;
+}
+.stat-icon.primary { background:var(--primary-light); }
+.stat-icon.success { background:var(--success-light); }
+.stat-icon.info    { background:var(--info-light); }
+.stat-icon.warning { background:var(--warning-light); }
+
+/* ================================================================
+   搜索栏（Search Bar）
+   ================================================================ */
 .search-bar {
-  padding:0 20px 12px; flex-shrink:0;
-  display:flex; gap:8px; align-items:center;
+  padding: 0 24px 16px;
 }
-.search-bar input {
-  flex:1; max-width:360px;
-  padding:8px 12px; border:1px solid var(--border-normal);
-  border-radius:var(--radius-md); background:var(--bg-input);
-  color:var(--text-primary); font-size:14px; outline:none;
-}
-.search-bar input:focus { border-color:var(--accent); }
-.search-bar select {
-  padding:8px 12px; border:1px solid var(--border-normal);
-  border-radius:var(--radius-md); background:var(--bg-input);
-  color:var(--text-primary); font-size:13px; outline:none;
-  cursor:pointer; appearance:auto;
-}
-.search-bar select:focus { border-color:var(--accent); }
-.btn {
-  padding:8px 16px; border:none; border-radius:var(--radius-md);
-  font-size:13px; font-weight:500; cursor:pointer;
-  transition:background var(--transition-fast);
-  white-space:nowrap;
-}
-.btn-primary { background:var(--accent); color:#fff; }
-.btn-primary:hover { background:var(--accent-hover); }
-.btn-secondary {
-  background:var(--bg-card); border:1px solid var(--border-normal);
-  color:var(--text-primary);
-}
-.btn-secondary:hover { background:var(--bg-hover); }
-.btn-sm { padding:4px 10px; font-size:12px; }
 
-/* ---- Content Area ---- */
-.content {
-  flex:1; overflow-y:auto; padding:0 20px 20px;
+/* 搜索输入框的包装容器：相对定位，用于内部绝对定位按钮 */
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
 }
-.content-header {
-  display:flex; align-items:center; gap:8px;
-  padding:12px 0; font-size:12px; color:var(--text-secondary);
-}
-.content-header .result-count { color:var(--accent); font-weight:600; }
-.content-header .clear-filters {
-  margin-left:auto; color:var(--accent); cursor:pointer; font-size:12px;
-}
-.content-header .clear-filters:hover { text-decoration:underline; }
 
-/* ---- Table ---- */
-.table-wrap {
-  background:var(--bg-card); border:1px solid var(--border-light);
-  border-radius:var(--radius-lg); overflow:hidden;
-  box-shadow:var(--shadow-xs);
+/* 搜索输入框：铺满整行，右侧留空给嵌入按钮 */
+.search-input-wrap input {
+  width: 100%;
+  padding: 9px 96px 9px 14px;   /* 右侧 96px 给 ✕ 和 🔍 按钮 */
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--transition);
 }
-table { width:100%; border-collapse:collapse; }
-thead { position:sticky; top:0; z-index:1; }
+.search-input-wrap input:focus { border-color: var(--primary); }
+.search-input-wrap input::placeholder { color: var(--text-muted); }
+
+/* 清除按钮（✕）：置于搜索按钮左侧 10px，默认隐藏 */
+.btn-reset {
+  position: absolute;
+  right: 58px;                  /* 搜索按钮 right:4px + 宽度约44px + 间距10px */
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  display: none;                /* 默认隐藏 */
+  transition: color var(--transition);
+}
+.btn-reset.visible { display: block; }   /* 输入框有内容时显示 */
+.btn-reset:hover { color: var(--text); }
+
+/* 搜索按钮（🔍）：嵌入输入框右侧内部 */
+.btn-search {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--primary);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 5px 14px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: background var(--transition);
+}
+.btn-search:hover { background: var(--primary-hover); }
+
+/* ================================================================
+   主体布局（Main Grid）
+   ================================================================ */
+.main-grid {
+  /* 两列布局：侧边栏 240px + 剩余空间 */
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  gap: 0;
+  padding: 0 24px 24px;
+  min-height: 0;
+}
+
+/* ================================================================
+   侧边栏筛选器（Sidebar / Filters）
+   ================================================================ */
+.sidebar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  height: fit-content;
+  /* sticky 定位：滚动时固定在 header 下方 */
+  position: sticky;
+  top: 68px;
+}
+
+/* 侧边栏标题行 */
+.sidebar h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 筛选分组（品牌方、价格来源等） */
+.filter-group {
+  margin-bottom: 14px;
+}
+
+/* 分组标签 */
+.filter-group > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+/* checkbox 列表容器：可滚动的多选列表 */
+.filter-group .checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;           /* 过高时显示滚动条 */
+  overflow-y: auto;
+}
+
+/* 单个 checkbox 项 */
+.filter-group .checkbox-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 4px;
+  transition: background var(--transition);
+}
+.filter-group .checkbox-list label:hover { background: var(--surface-hover); }
+.filter-group .checkbox-list input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 14px;
+  height: 14px;
+}
+
+/* 数值范围输入组（价格范围、日期范围） */
+.filter-group .range-inputs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.filter-group .range-inputs input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.filter-group .range-inputs input:focus { border-color: var(--primary); }
+.filter-group .range-inputs span {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* 日期输入框：圆角 + 选中态对比色边框 */
+.filter-group .range-inputs input[type="date"] {
+  border-radius: var(--radius);
+  transition: all 0.2s ease;
+}
+/* 日期有值时显示对比色边框（注意：[value=""] 选择器匹配空值属性） */
+.filter-group .range-inputs input[type="date"]:not([value=""]) {
+  border-width: 2px;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* GitHub 风格日期密度色阶：命中记录越多，底色越绿 */
+.filter-group .range-inputs input.date-density-0 { background: var(--surface); }
+.filter-group .range-inputs input.date-density-1 { background: #e8f0e8; }
+.filter-group .range-inputs input.date-density-2 { background: #c4e0c4; }
+.filter-group .range-inputs input.date-density-3 { background: #94d494; }
+[data-theme="dark"] .filter-group .range-inputs input.date-density-1 { background: #1a2e1a; }
+[data-theme="dark"] .filter-group .range-inputs input.date-density-2 { background: #1e4620; }
+[data-theme="dark"] .filter-group .range-inputs input.date-density-3 { background: #245e28; }
+
+/* 筛选器徽章：显示当前激活的筛选条件数量 */
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  padding: 0 5px;
+}
+
+/* "清除全部"链接 */
+.reset-link {
+  font-size: 11px;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+.reset-link:hover { text-decoration: underline; }
+
+/* ================================================================
+   表格区域（Table Area）
+   ================================================================ */
+.table-area {
+  margin-left: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* 表格工具栏：显示记录总数 */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.table-info {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.table-info strong { color: var(--text); }
+
+/* 表格水平滚动容器 */
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* 表格基础样式 */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* 表头：sticky 定位，滚动时始终可见 */
+thead { position: sticky; top: 0; z-index: 1; }
 th {
-  background:var(--bg-sidebar); text-align:left;
-  padding:10px 14px; font-size:12px; font-weight:600;
-  color:var(--text-secondary); border-bottom:1px solid var(--border-light);
-  white-space:nowrap; user-select:none;
+  background: var(--surface-hover);
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition);
 }
-th.sortable { cursor:pointer; }
-th.sortable:hover { color:var(--accent); }
+th:hover { color: var(--primary); }
+/* 排序箭头：▲ 升序 / ▼ 降序 / ⇅ 未排序 */
+th .sort-arrow { margin-left: 4px; font-size: 10px; }
+th.sorted { color: var(--primary); }
+
+/* 表格数据行 */
 td {
-  padding:10px 14px; font-size:13px;
-  border-bottom:1px solid var(--border-light);
-  vertical-align:middle;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;     /* 过长文字截断为 ... */
 }
-tr:last-child td { border-bottom:none; }
-tr:hover td { background:var(--bg-hover); }
-td.brand { font-weight:500; color:var(--accent); }
-td.price { font-weight:600; font-variant-numeric:tabular-nums; }
-td.price-source .badge {
-  display:inline-block; padding:2px 8px; border-radius:var(--radius-full);
-  font-size:11px; font-weight:500;
-  background:var(--accent-light); color:var(--accent);
-}
-td.user-id { color:var(--text-tertiary); font-size:12px; }
-td.time { color:var(--text-tertiary); font-size:12px; white-space:nowrap; }
-td .link-icon {
-  color:var(--text-tertiary); text-decoration:none; font-size:14px;
-}
-td .link-icon:hover { color:var(--accent); }
+tr:hover td { background: var(--surface-hover); }
 
-/* ---- Pagination ---- */
+/* 彩色标签：品牌方（紫色）/ 查价来源（蓝色）/ 价格来源（绿色） */
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.tag-brand  { background: var(--primary-light); color: var(--primary); }
+.tag-source { background: var(--info-light);    color: var(--info); }
+.tag-store  { background: var(--success-light); color: var(--success); }
+
+/* 价格列：红色醒目 */
+.price-cell { font-weight: 600; color: var(--danger); }
+
+/* 链接列："查看" 文字链接 */
+.link-cell a {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 12px;
+}
+.link-cell a:hover { text-decoration: underline; }
+
+/* ================================================================
+   分页栏（Pagination）
+   ================================================================ */
 .pagination {
-  display:flex; align-items:center; justify-content:center; gap:4px;
-  padding:16px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
 }
+
+/* 页码按钮组 */
+.pagination .page-btns {
+  display: flex;
+  gap: 4px;
+}
+
+/* 页码按钮基础样式 */
 .pagination button {
-  min-width:32px; height:32px; border:1px solid var(--border-normal);
-  border-radius:var(--radius-sm); background:var(--bg-card);
-  color:var(--text-primary); font-size:13px; cursor:pointer;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.pagination button:hover { background:var(--bg-hover); }
-.pagination button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-.pagination button:disabled { opacity:0.4; cursor:default; }
+.pagination button:hover:not(:disabled) { background: var(--surface-hover); }
 
-/* ---- Empty / Loading States ---- */
+/* 当前页码：高亮品牌色 */
+.pagination button.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.pagination button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 每页条数选择器（内嵌在分页栏文字中） */
+.page-size-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+/* ================================================================
+   空状态与加载状态
+   ================================================================ */
+
+/* 表格为空时显示 */
 .empty-state {
-  text-align:center; padding:60px 20px; color:var(--text-tertiary);
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
 }
-.empty-state .empty-icon { font-size:48px; margin-bottom:12px; opacity:0.5; }
-.empty-state p { font-size:14px; }
+.empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+
+/* 加载中状态 */
 .loading-overlay {
-  display:flex; align-items:center; justify-content:center;
-  padding:40px; gap:10px; color:var(--text-secondary);
-}
-.loading-overlay .spinner-lg {
-  width:24px; height:24px; border:3px solid var(--text-tertiary);
-  border-top-color:var(--accent); border-radius:50%;
-  animation:spin 0.6s linear infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 10px;
+  color: var(--text-secondary);
 }
 
-/* ---- Responsive ---- */
-@media (max-width:900px) {
-  .sidebar { display:none; }
-  .metrics { grid-template-columns:repeat(2,1fr); }
+/* 加载转圈动画 */
+.spinner-lg {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--text-muted);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ================================================================
+   Toast 通知浮层
+   ================================================================ */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  /* 初始状态：向下平移 20px 并透明，visible 时滑入 */
+  transform: translateX(-50%) translateY(20px);
+  padding: 10px 20px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: 1000;
+}
+.toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ================================================================
+   响应式布局（Responsive）
+   ================================================================ */
+
+/* 平板：指标卡片改为 2 列，侧边栏移到表格上方 */
+@media (max-width: 1024px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .main-grid { grid-template-columns: 1fr; }
+  .sidebar { position: static; }
+  .table-area { margin-left: 0; margin-top: 16px; }
+}
+
+/* 手机：指标卡片改为 1 列，减小水平内边距 */
+@media (max-width: 640px) {
+  .stats-row { grid-template-columns: 1fr; }
+  .header { padding: 0 12px; }
+  .stats-row,.search-bar,.main-grid { padding-left:12px; padding-right:12px; }
 }
