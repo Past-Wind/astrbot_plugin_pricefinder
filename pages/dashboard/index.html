@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PriceFinder</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">&#9670; PriceFinder</span>
+</div>
+
+<div class="layout">
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-section">
+    <span class="sidebar-label">品牌方</span>
+    <div id="filter-brand"></div>
+  </div>
+  <div class="sidebar-section">
+    <span class="sidebar-label">售价来源</span>
+    <div id="filter-price-source"></div>
+  </div>
+  <div class="sidebar-section">
+    <span class="sidebar-label">查价来源</span>
+    <div id="filter-query-source"></div>
+  </div>
+  <div class="sidebar-section">
+    <span class="sidebar-label">时间范围</span>
+    <select class="filter-select" id="filterTimeRange">
+      <option value="all">全部时间</option>
+      <option value="today">今天</option>
+      <option value="7d">近 7 天</option>
+      <option value="30d">近 30 天</option>
+    </select>
+  </div>
+</aside>
+
+<div class="main">
+
+  <div class="metrics">
+    <div class="metric-card accent">
+      <div class="metric-label">总缓存条目</div>
+      <div class="metric-value" id="metricEntries">-</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">总查询次数</div>
+      <div class="metric-value" id="metricQueries">-</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">今日查询</div>
+      <div class="metric-value" id="metricToday">-</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">活跃用户数</div>
+      <div class="metric-value" id="metricUsers">-</div>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="搜索关键词、品牌、型号...">
+    <select id="searchSource">
+      <option value="">全部来源</option>
+    </select>
+    <button class="btn btn-primary" id="btnSearch">&#128269; 搜索</button>
+    <button class="btn btn-secondary" id="btnReset">&#8634; 重置</button>
+  </div>
+
+  <div class="content">
+    <div class="content-header">
+      共 <span class="result-count" id="resultCount">-</span> 条结果
+      <span class="clear-filters" id="clearFilters">清除所有筛选</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th class="sortable" data-sort="brand">品牌方</th>
+            <th class="sortable" data-sort="product_name">商品名</th>
+            <th class="sortable" data-sort="model">型号</th>
+            <th class="sortable" data-sort="price" style="text-align:right">售价</th>
+            <th class="sortable" data-sort="price_source">售价来源</th>
+            <th class="sortable" data-sort="query_source">查价来源</th>
+            <th class="sortable" data-sort="user_id">查价用户</th>
+            <th class="sortable" data-sort="timestamp">时间</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+</div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

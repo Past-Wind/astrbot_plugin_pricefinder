@@ -18,10 +18,13 @@ from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
+from quart import jsonify, request
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger, AstrBotConfig
+
+PLUGIN_NAME = "astrbot_plugin_pricefinder"
 
 # 默认 User-Agent，模拟浏览器访问
 DEFAULT_UA = (
@@ -35,18 +38,24 @@ class PriceResult:
     """商品价格搜索结果数据类
 
     Attributes:
-        title: 商品标题
+        title: 商品原始标题（爬虫直接获取）
+        brand: 品牌方（如 "Apple"、"小米"）
+        product_name: 商品名（如 "iPhone 16 Pro"）
+        model: 商品详细型号（如 "256GB 沙漠金"）
         price: 商品价格（如 "¥99.00"）
-        store: 来源商城名称（如 "京东"、"淘宝"）
+        price_source: 售价来源（如 "京东"、"淘宝"）
         url: 商品详情页链接
-        source: 数据来源（固定为 "ManManBuy"）
+        query_source: 查价来源（如 "ManManBuy"）
         history_low: 历史最低价（可选，爬虫未提供时为空）
     """
     title: str
-    price: str
-    store: str
-    url: str
-    source: str
+    brand: str = ""
+    product_name: str = ""
+    model: str = ""
+    price: str = ""
+    price_source: str = ""
+    url: str = ""
+    query_source: str = ""
     history_low: str = ""
 
 
@@ -56,12 +65,14 @@ class CacheEntry:
 
     Attributes:
         query: 搜索关键词
+        user_id: 查价用户 ID
         timestamp: 缓存时间戳（epoch 秒）
         manmanbuy_results: 搜索结果列表
         embedding: 查询的向量嵌入（用于语义相似搜索）
     """
     query: str
     timestamp: float
+    user_id: str = ""
     manmanbuy_results: list = field(default_factory=list)
     embedding: list = field(default_factory=list)
 
@@ -69,6 +80,7 @@ class CacheEntry:
         """序列化为字典，用于 JSON 持久化"""
         return {
             "query": self.query,
+            "user_id": self.user_id,
             "timestamp": self.timestamp,
             "manmanbuy_results": [asdict(r) for r in self.manmanbuy_results],
             "embedding": self.embedding,
@@ -76,11 +88,27 @@ class CacheEntry:
 
     @classmethod
     def from_dict(cls, d: dict) -> "CacheEntry":
-        """从字典反序列化，用于从 JSON 加载"""
+        """从字典反序列化，用于从 JSON 加载
+
+        兼容旧版缓存格式：自动将 store→price_source、source→query_source
+        """
+        results_raw = d.get("manmanbuy_results", [])
+        migrated = []
+        for r in results_raw:
+            r_migrated = dict(r)
+            if "store" in r_migrated and "price_source" not in r_migrated:
+                r_migrated["price_source"] = r_migrated.pop("store")
+            if "source" in r_migrated and "query_source" not in r_migrated:
+                r_migrated["query_source"] = r_migrated.pop("source")
+            r_migrated.setdefault("brand", "")
+            r_migrated.setdefault("product_name", "")
+            r_migrated.setdefault("model", "")
+            migrated.append(PriceResult(**r_migrated))
         return cls(
             query=d["query"],
             timestamp=d["timestamp"],
-            manmanbuy_results=[PriceResult(**r) for r in d.get("manmanbuy_results", [])],
+            user_id=d.get("user_id", ""),
+            manmanbuy_results=migrated,
             embedding=d.get("embedding", []),
         )
 
@@ -123,6 +151,8 @@ class CacheManager:
         self.embedding_file = embedding_file
         self.entries: dict[str, CacheEntry] = {}  # key -> CacheEntry 映射
         self.index: list[EmbeddingIndex] = []  # 向量索引列表
+        self.total_queries: int = 0  # 总查询次数计数器
+        self._load_stats()  # 加载统计计数器
         self._load()
 
     def _load(self):
@@ -167,6 +197,126 @@ class CacheManager:
                 json.dump([asdict(item) for item in self.index], f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.warning(f"Failed to save embedding index: {e}")
+
+    def _stats_file(self) -> Path:
+        """统计计数器文件路径"""
+        return self.cache_file.parent / "stats.json"
+
+    def _load_stats(self):
+        """从磁盘加载统计计数器"""
+        try:
+            sf = self._stats_file()
+            if sf.exists():
+                with open(sf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.total_queries = data.get("total_queries", 0)
+        except Exception:
+            self.total_queries = 0
+
+    def _save_stats(self):
+        """持久化统计计数器到磁盘"""
+        try:
+            sf = self._stats_file()
+            sf.parent.mkdir(parents=True, exist_ok=True)
+            with open(sf, "w", encoding="utf-8") as f:
+                json.dump({"total_queries": self.total_queries}, f)
+        except Exception as e:
+            logger.warning(f"Failed to save stats: {e}")
+
+    def increment_query(self):
+        """递增总查询次数计数器"""
+        self.total_queries += 1
+        self._save_stats()
+
+    def get_stats(self) -> dict:
+        """返回仪表盘统计信息
+
+        Returns:
+            包含 total_entries, total_queries, today_queries, active_users 等指标的字典
+        """
+        now = time.time()
+        today_start = now - (now % 86400)
+        today_queries = 0
+        users = set()
+        for entry in self.entries.values():
+            if entry.timestamp >= today_start:
+                today_queries += 1
+            if entry.user_id:
+                users.add(entry.user_id)
+        return {
+            "total_entries": len(self.entries),
+            "total_queries": self.total_queries,
+            "today_queries": today_queries,
+            "active_users": len(users),
+        }
+
+    def get_all_results(self, filters: dict | None = None) -> list:
+        """获取所有缓存条目中的搜索结果（展平为单条记录）
+
+        Args:
+            filters: 可选筛选条件，支持 brand, price_source, query_source, keyword, user_id
+
+        Returns:
+            展平后的结果列表，每项包含 PriceResult 所有字段 + query + user_id + timestamp
+        """
+        results = []
+        filters = filters or {}
+        for key, entry in self.entries.items():
+            for r in entry.manmanbuy_results:
+                record = {
+                    "query": entry.query,
+                    "user_id": entry.user_id,
+                    "timestamp": entry.timestamp,
+                    "title": r.title,
+                    "brand": r.brand,
+                    "product_name": r.product_name,
+                    "model": r.model,
+                    "price": r.price,
+                    "price_source": r.price_source,
+                    "url": r.url,
+                    "query_source": r.query_source,
+                    "history_low": r.history_low,
+                }
+                if self._match_filters(record, filters):
+                    results.append(record)
+        results.sort(key=lambda x: x["timestamp"], reverse=True)
+        return results
+
+    def _match_filters(self, record: dict, filters: dict) -> bool:
+        """检查记录是否匹配所有筛选条件"""
+        keyword = (filters.get("keyword") or "").lower()
+        if keyword:
+            match = False
+            for field in ("brand", "product_name", "model", "query", "price_source", "title"):
+                if keyword in (record.get(field) or "").lower():
+                    match = True
+                    break
+            if not match:
+                return False
+        for key in ("brand", "price_source", "query_source", "user_id"):
+            fv = filters.get(key)
+            if fv and record.get(key) != fv:
+                return False
+        return True
+
+    def get_filter_options(self) -> dict:
+        """返回筛选器可选项（品牌、售价来源、查价来源的去重列表）"""
+        brands = set()
+        price_sources = set()
+        query_sources = set()
+        for entry in self.entries.values():
+            for r in entry.manmanbuy_results:
+                if r.brand:
+                    brands.add(r.brand)
+                if r.price_source:
+                    price_sources.add(r.price_source)
+                if r.query_source:
+                    query_sources.add(r.query_source)
+        return {
+            "brands": sorted(brands),
+            "price_sources": sorted(price_sources),
+            "query_sources": sorted(query_sources),
+        }
 
     def get(self, key: str) -> CacheEntry | None:
         """按精确键获取缓存条目"""
@@ -312,6 +462,7 @@ class PriceFinderPlugin(Star):
             timeout=httpx.Timeout(self.config.get("network_settings", {}).get("timeout", 15)),
             follow_redirects=True,
         )
+        self._register_web_api()
         logger.info("PriceFinder plugin initialized")
 
     async def terminate(self):
@@ -477,15 +628,15 @@ class PriceFinderPlugin(Star):
                 price_el = item.select_one(".DiscountItemPC_itemSubTitle__rWgWK a")
                 price = price_el.get_text(strip=True) if price_el else ""
 
-                store_el = item.select_one(".DiscountItemPC_itemMall__R8PlE")
-                store = store_el.get_text(strip=True) if store_el else ""
+                price_source_el = item.select_one(".DiscountItemPC_itemMall__R8PlE")
+                price_source_text = price_source_el.get_text(strip=True) if price_source_el else ""
 
                 results.append(PriceResult(
                     title=title,
                     price=price,
-                    store=store,
+                    price_source=price_source_text,
                     url=href,
-                    source="ManManBuy",
+                    query_source="ManManBuy",
                 ))
             except Exception as e:
                 logger.warning(f"Failed to parse ManManBuy item: {e}")
@@ -573,7 +724,7 @@ class PriceFinderPlugin(Star):
         """
         lines = []
         for i, r in enumerate(results, 1):
-            line = f"{i}. {r.title} | {r.price} | {r.store} | {r.url}"
+            line = f"{i}. {r.title} | {r.price} | {r.price_source} | {r.url}"
             if r.history_low:
                 line += f" | 历史低价:{r.history_low}"
             lines.append(line)
@@ -637,8 +788,8 @@ class PriceFinderPlugin(Star):
             for i, r in enumerate(results.manmanbuy_results, 1):
                 lines.append(f"{i}. {r.title}")
                 price_line = f"   💰 {r.price}"
-                if r.store:
-                    price_line += f" | 🏪 {r.store}"
+                if r.price_source:
+                    price_line += f" | 🏪 {r.price_source}"
                 lines.append(price_line)
                 if r.history_low:
                     lines.append(f"   📉 历史低价: {r.history_low}")
@@ -649,17 +800,20 @@ class PriceFinderPlugin(Star):
 
         return "\n".join(lines)
 
-    async def _do_search(self, keyword: str) -> CacheEntry:
+    async def _do_search(self, keyword: str, user_id: str = "") -> CacheEntry:
         """执行搜索的主流程
 
         流程: 检查缓存 → 未命中则爬取 → 写入缓存 → 返回结果
 
         Args:
             keyword: 搜索关键词
+            user_id: 查价用户 ID
 
         Returns:
             搜索结果缓存条目
         """
+        self.cache.increment_query()
+
         has_cache, cached = await self.has_query(keyword)
         if has_cache and cached:
             cache_age_days = (time.time() - cached.timestamp) / 86400
@@ -671,6 +825,7 @@ class PriceFinderPlugin(Star):
 
         results = CacheEntry(
             query=keyword,
+            user_id=user_id,
             timestamp=time.time(),
             manmanbuy_results=manmanbuy_results,
         )
@@ -683,6 +838,64 @@ class PriceFinderPlugin(Star):
             await self.cache.put(keyword, results, embedding, max_entries)
 
         return results
+
+    def _register_web_api(self):
+        """注册 WebUI 页面所需的 API 路由"""
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/stats",
+            self._page_stats,
+            ["GET"],
+            "PriceFinder Page stats",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/search",
+            self._page_search,
+            ["GET"],
+            "PriceFinder Page search",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/filters",
+            self._page_filters,
+            ["GET"],
+            "PriceFinder Page filter options",
+        )
+
+    async def _page_stats(self):
+        """仪表盘统计信息"""
+        if self.cache is None:
+            return jsonify({"total_entries": 0, "total_queries": 0, "today_queries": 0, "active_users": 0})
+        return jsonify(self.cache.get_stats())
+
+    async def _page_search(self):
+        """按条件搜索缓存结果"""
+        if self.cache is None:
+            return jsonify([])
+
+        filters = {}
+        keyword = (request.args.get("keyword") or "").strip()
+        price_source = (request.args.get("price_source") or "").strip()
+        time_range = (request.args.get("time_range") or "").strip()
+
+        if keyword:
+            filters["keyword"] = keyword
+        if price_source:
+            filters["price_source"] = price_source
+
+        results = self.cache.get_all_results(filters)
+
+        if time_range and time_range != "all":
+            now = time.time()
+            ranges = {"today": 86400, "7d": 604800, "30d": 2592000}
+            cutoff = now - ranges.get(time_range, 0)
+            results = [r for r in results if r["timestamp"] >= cutoff]
+
+        return jsonify(results)
+
+    async def _page_filters(self):
+        """返回筛选器可选项"""
+        if self.cache is None:
+            return jsonify({"brands": [], "price_sources": [], "query_sources": []})
+        return jsonify(self.cache.get_filter_options())
 
     @filter.command_group("price")
     def price(self):
@@ -702,7 +915,8 @@ class PriceFinderPlugin(Star):
             yield event.plain_result("用法: /price search <关键词>\n示例: /price search iPhone 16")
             return
 
-        results = await self._do_search(keyword)
+        user_id = event.get_sender_id()
+        results = await self._do_search(keyword, user_id)
         all_results = results.manmanbuy_results
         all_results = await self._ai_filter_results(all_results, keyword)
 
@@ -730,8 +944,8 @@ class PriceFinderPlugin(Star):
             line = f"{i}. {r.title}"
             if r.price:
                 line += f" | {r.price}"
-            if r.store:
-                line += f" | {r.store}"
+            if r.price_source:
+                line += f" | {r.price_source}"
             if r.history_low:
                 line += f" | 历史低价: {r.history_low}"
             if r.url:
@@ -749,7 +963,8 @@ class PriceFinderPlugin(Star):
         Args:
             keyword(string): 商品关键词，如 "iPhone 16"、"机械键盘"、"显卡"
         """
-        results = await self._do_search(keyword)
+        user_id = event.get_sender_id()
+        results = await self._do_search(keyword, user_id)
         all_results = results.manmanbuy_results
         all_results = await self._ai_filter_results(all_results, keyword)
 

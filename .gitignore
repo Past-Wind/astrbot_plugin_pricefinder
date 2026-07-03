@@ -206,11 +206,13 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-#mimo
+#agents
 /.mimocode
 /dev_docs
 /example
 /standard
+/doc
+/test
 
 # 不忽略 AGENTS.md
 !AGENTS.md
