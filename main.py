@@ -306,10 +306,11 @@ class CacheManager:
         return True
 
     def get_filter_options(self) -> dict:
-        """返回筛选器可选项（品牌、售价来源、查价来源的去重列表）"""
+        """返回筛选器可选项（品牌、售价来源、查价来源、用户的去重列表）"""
         brands = set()
         price_sources = set()
         query_sources = set()
+        users = set()
         for entry in self.entries.values():
             for r in entry.manmanbuy_results:
                 if r.brand:
@@ -318,10 +319,13 @@ class CacheManager:
                     price_sources.add(r.price_source)
                 if r.query_source:
                     query_sources.add(r.query_source)
+            if entry.user_id:
+                users.add(entry.user_id)
         return {
             "brands": sorted(brands),
             "price_sources": sorted(price_sources),
             "query_sources": sorted(query_sources),
+            "users": sorted(users),
         }
 
     def get(self, key: str) -> CacheEntry | None:

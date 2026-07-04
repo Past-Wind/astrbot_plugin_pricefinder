@@ -61,8 +61,9 @@
   --surface: #1c1f2e;
   --surface-hover: #262a3d;
 
-  /* 边框：必须比表面亮才能可见 */
-  --border: #363b50;
+  /* 边框：必须比表面亮才能可见，增强描边 */
+  --border: #4a5070;
+  --border-strong: #5b638a;
 
   /* 文字：在暗色背景上需要更亮 */
   --text: #eaecf0;
@@ -127,14 +128,6 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-/* 插件 logo 图片（../../logo.png） */
-.header-title .logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  object-fit: contain;
 }
 
 /* 主题切换按钮 */
@@ -374,12 +367,20 @@ body {
   flex-shrink: 0;
 }
 
-/* 日期输入框：圆角 + 选中态对比色边框 */
+/* 日期输入框：让日历图标有足够空间 */
 .filter-group .range-inputs input[type="date"] {
   border-radius: var(--radius);
-  transition: all 0.2s ease;
+  min-width: 0;
 }
-/* 日期有值时显示对比色边框（注意：[value=""] 选择器匹配空值属性） */
+/* 日期范围组：纵向堆叠避免两列并排太窄导致图标遮挡文字 */
+.filter-group .range-inputs.date-range {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.filter-group .range-inputs.date-range span {
+  text-align: center;
+}
 .filter-group .range-inputs input[type="date"]:not([value=""]) {
   border-width: 2px;
   border-color: var(--primary);
@@ -541,7 +542,7 @@ tr:hover td { background: var(--surface-hover); }
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
-  transition: all var(--transition);
+  transition: background var(--transition), color var(--transition);
   display: flex;
   align-items: center;
   justify-content: center;

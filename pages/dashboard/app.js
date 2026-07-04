@@ -72,6 +72,7 @@ const state = {
     brands: new Set(),        // 选中的品牌方集合
     priceSources: new Set(),  // 选中的价格来源集合
     querySources: new Set(),  // 选中的查价来源集合
+    users: new Set(),         // 选中的查询用户集合
     priceMin: "",             // 价格下限
     priceMax: "",             // 价格上限
     dateFrom: "",             // 起始日期
@@ -91,6 +92,7 @@ const state = {
   _brands: [],         // 品牌方列表（来自 /page/filters）
   _priceSources: [],   // 价格来源列表
   _querySources: [],   // 查价来源列表
+  _users: [],          // 查询用户列表
   // bridge 和 ApiClient 引用（init 时赋值）
   api: null,
   bridge: null,
@@ -198,6 +200,7 @@ async function loadFilterOptions() {
     state._brands = options.brands || [];
     state._priceSources = options.price_sources || [];
     state._querySources = options.query_sources || [];
+    state._users = options.users || [];
     renderSidebar();
   } catch (e) {
     showToast("加载筛选选项失败", true);
@@ -257,6 +260,7 @@ function applyFilters() {
   if (state.filters.brands.size > 0)       { count++; data = data.filter(r => state.filters.brands.has(r.brand)); }
   if (state.filters.priceSources.size > 0) { count++; data = data.filter(r => state.filters.priceSources.has(r.price_source)); }
   if (state.filters.querySources.size > 0) { count++; data = data.filter(r => state.filters.querySources.has(r.query_source)); }
+  if (state.filters.users.size > 0)        { count++; data = data.filter(r => state.filters.users.has(r.user_id)); }
 
   // 3. 价格范围筛选
   if (state.filters.priceMin !== "") { count++; const min = parseFloat(state.filters.priceMin); data = data.filter(r => parsePrice(r.price) >= min); }
@@ -309,6 +313,7 @@ function onFilterChange() {
   state.filters.brands = new Set();
   state.filters.priceSources = new Set();
   state.filters.querySources = new Set();
+  state.filters.users = new Set();
 
   allChecks.forEach(cb => {
     if (!cb.checked) return;
@@ -317,6 +322,7 @@ function onFilterChange() {
     if (group.includes("品牌")) state.filters.brands.add(cb.value);
     else if (group.includes("价格来源")) state.filters.priceSources.add(cb.value);
     else if (group.includes("查价来源")) state.filters.querySources.add(cb.value);
+    else if (group.includes("查询用户")) state.filters.users.add(cb.value);
   });
 
   applyFilters();
@@ -334,6 +340,7 @@ function clearFilters() {
     brands: new Set(),
     priceSources: new Set(),
     querySources: new Set(),
+    users: new Set(),
     priceMin: "", priceMax: "",
     dateFrom: "", dateTo: "",
     keyword: "",
@@ -398,6 +405,7 @@ function renderSidebar() {
   const brands = state._brands || [];
   const priceSources = state._priceSources || [];
   const querySources = state._querySources || [];
+  const users = state._users || [];
   // 筛选器徽章：显示当前激活的筛选条件数
   const badgeHtml = state.activeFilterCount > 0
     ? `<span class="filter-badge">${state.activeFilterCount}</span>` : "";
@@ -423,6 +431,12 @@ function renderSidebar() {
       </div>
     </div>
     <div class="filter-group">
+      <label>查询用户</label>
+      <div class="checkbox-list">
+        ${users.map(u => `<label><input type="checkbox" value="${esc(u)}" ${state.filters.users.has(u) ? "checked" : ""} /> ${esc(u)}</label>`).join("")}
+      </div>
+    </div>
+    <div class="filter-group">
       <label>价格范围</label>
       <div class="range-inputs">
         <input type="number" placeholder="最低(¥)" value="${state.filters.priceMin}" id="filterPriceMin" />
@@ -432,7 +446,7 @@ function renderSidebar() {
     </div>
     <div class="filter-group">
       <label>时间范围</label>
-      <div class="range-inputs">
+      <div class="range-inputs date-range">
         <input type="date" value="${state.filters.dateFrom}" id="filterDateFrom" min="2015-01-01" max="2050-12-31" />
         <span>-</span>
         <input type="date" value="${state.filters.dateTo}" id="filterDateTo" min="2015-01-01" max="2050-12-31" />
