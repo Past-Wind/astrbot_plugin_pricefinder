@@ -99,6 +99,30 @@
                 "type": "int",
                 "default": 3000,
                 "hint": "传给 LLM 的最大文本字符数，避免超长"
+            },
+            "filter_combo_products": {
+                "description": "过滤套装/组合商品（板U套装、准系统、整机等）",
+                "type": "bool",
+                "default": true,
+                "hint": "搜索单件商品时自动剔除组合套餐"
+            },
+            "price_outlier_filter_enabled": {
+                "description": "启用价格异常过滤",
+                "type": "bool",
+                "default": true,
+                "hint": "剔除与同类商品中位数价格偏差过大的结果"
+            },
+            "price_outlier_lower_ratio": {
+                "description": "价格异常下限比例",
+                "type": "float",
+                "default": 0.3,
+                "hint": "价格低于中位数 × 此值视为异常"
+            },
+            "price_outlier_upper_ratio": {
+                "description": "价格异常上限比例",
+                "type": "float",
+                "default": 3.0,
+                "hint": "价格高于中位数 × 此值视为异常"
             }
         }
     }

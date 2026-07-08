@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-07-08
+
+### Added
+- 多商品列表页预过滤：`_is_multi_product_listing()` 检测单链接含 ≥3 个品牌或 ≥4 个斜杠型号变体的通用列表页，LLM 调用前剔除
+- 套装/组合商品预过滤：`_is_combo_product()` 识别板U套装、准系统、整机等标题；`_is_combo_search()` 判断用户意图，搜索"套装"时自动跳过过滤
+- 价格异常过滤：`_filter_price_outliers()` 提取纯数字价格后按中位数统计法剔除离群值，配置项 `price_outlier_lower_ratio`(默认 0.3) / `price_outlier_upper_ratio`(默认 3.0) 自定义上下界
+- 模块常量 `_KNOWN_BRANDS`（24 个品牌白名单 frozenset）和 `_COMBO_KEYWORDS`（13 个套装关键词列表）
+- `_clean_result_fields()` 后处理清洗函数（调用处已注释，预留 SEO 黑名单和品牌冗余修正逻辑）
+- `_conf_schema.json` 新增 `filter_combo_products`、`price_outlier_filter_enabled`、`price_outlier_lower_ratio`、`price_outlier_upper_ratio` 配置项
+
+### Changed
+- `_ai_filter_and_structure` prompt 重写：新增 PC 硬件品类（显卡/CPU/主板套装）字段提取规则，附带 4 个正确 vs 错误对比示例
+- 阶段0 预过滤块重构：从单步列表页检测扩展为三步链式（0a 列表页 → 0b 套装 → 0c 价格异常），各阶段独立日志
+
 ## [0.2.0] - 2026-07-04
 
 ### Added
@@ -45,5 +59,6 @@
 ### Removed
 - 移除搜索设置中"启用慢慢买搜索"开关，搜索始终执行
 
+[0.2.1]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.1.0

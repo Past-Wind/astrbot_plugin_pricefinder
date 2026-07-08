@@ -20,12 +20,12 @@ from urllib.parse import quote
 # ========== 第三方库导入 ==========
 import httpx                          # 异步 HTTP 客户端（爬虫用）
 from bs4 import BeautifulSoup         # HTML 解析器
-from quart import jsonify, request    # Web API 框架（AstrBot 内建）
+from quart import jsonify, request    # pyright: ignore[reportMissingImports] # Web API 框架（AstrBot 内建）
 
 # ========== AstrBot SDK 导入 ==========
-from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger, AstrBotConfig
+from astrbot.api.event import filter, AstrMessageEvent # pyright: ignore[reportMissingImports]
+from astrbot.api.star import Context, Star, register # pyright: ignore[reportMissingImports]
+from astrbot.api import logger, AstrBotConfig # pyright: ignore[reportMissingImports]
 
 # 插件完整名称：AstrBot 通过目录名识别，Web API 路由前缀需要此常量
 PLUGIN_NAME = "astrbot_plugin_pricefinder"
@@ -439,6 +439,24 @@ def _cosine_similarity(a: list, b: list) -> float:
     return dot / (norm_a * norm_b)
 
 
+# 多商品列表页检测用品牌白名单（文案中出现3家以上品牌即判定为列表页）
+_KNOWN_BRANDS = frozenset({
+    "七彩虹", "华硕", "影驰", "微星", "技嘉", "耕升",
+    "索泰", "铭瑄", "盈通", "蓝宝石", "撼讯", "讯景",
+    "华为", "小米", "OPPO", "vivo", "三星", "Sony",
+    "Apple", "苹果", "联想", "戴尔", "惠普", "宏碁",
+})
+
+# 套装/组合商品检测关键词
+_COMBO_KEYWORDS = [
+    "套装", "板U", "CPU套装", "主板套装", "CPU+主板",
+    "准系统", "barebone",
+    "整机", "组装电脑", "主机", "台式机",
+    "套餐", "组合", "搭配", "整套",
+    "显卡+电源", "显卡电源套",
+]
+
+
 @register("pricefinder", "past_windXF", "搜索慢慢买商品比价信息", "1.0.0")
 class PriceFinderPlugin(Star):
     """PriceFinder 插件主类
@@ -466,7 +484,7 @@ class PriceFinderPlugin(Star):
         创建缓存目录，初始化缓存管理器和 HTTP 客户端。
         缓存目录位于 AstrBot 数据目录下的 plugin_data/pricefinder/
         """
-        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path # pyright: ignore[reportMissingImports]
         cache_dir = Path(get_astrbot_data_path()) / "plugin_data" / self.name
         self.cache = CacheManager(
             cache_file=cache_dir / "cache.json",
@@ -661,12 +679,102 @@ class PriceFinderPlugin(Star):
 
         return results
 
+    @staticmethod
+    def _is_multi_product_listing(result) -> bool:
+        """检测单条链接是否为多品牌/多型号商品列表页
+
+        规则:
+        1. 标题中出现 3 家以上已知品牌 → 列表页
+        2. 标题中斜杠分隔的纯型号变体 >= 4 个 → 列表页
+
+        满足任一即返回 True，该条目不送入 LLM 处理。
+        """
+        title = result.title
+
+        brand_count = sum(1 for b in _KNOWN_BRANDS if b in title)
+        if brand_count >= 3:
+            return True
+
+        import re
+        parts = re.split(r"[/／]", title)
+        model_count = sum(
+            1 for p in parts
+            if re.match(r"^[A-Za-z0-9+\-]+\s*$", p.strip())
+        )
+        return model_count >= 4
+
+    @staticmethod
+    def _is_combo_product(result) -> bool:
+        """检测单品链接是否为套装/准系统/整机类组合商品"""
+        return any(kw in result.title for kw in _COMBO_KEYWORDS)
+
+    @staticmethod
+    def _is_combo_search(keyword: str) -> bool:
+        """检测用户搜索意图是否为有意搜寻组合商品"""
+        if not keyword:
+            return False
+        combo_intent_keywords = ["套装", "准系统", "板U", "整机", "套餐", "组合"]
+        return any(kw in keyword for kw in combo_intent_keywords)
+
+    def _filter_price_outliers(self, results: list) -> list:
+        """基于中位数统计法剔除价格异常的离群结果
+
+        从价格文本中提取纯数字，计算中位数后按上下界过滤。
+        无有效价格的结果直接保留。
+
+        Returns:
+            过滤后的 PriceResult 列表
+        """
+        import re
+
+        # 提取有效价格
+        prices = []
+        for r in results:
+            m = re.search(r"(\d+(?:\.\d+)?)", r.price.replace(",", ""))
+            if m:
+                prices.append((float(m.group(1)), r))
+
+        if len(prices) < 2:
+            return results
+
+        values = sorted(v for v, _ in prices)
+        n = len(values)
+        if n % 2 == 0:
+            median = (values[n // 2 - 1] + values[n // 2]) / 2
+        else:
+            median = values[n // 2]
+
+        ai_cfg = self.config.get("ai_filter_settings", {})
+        lower_ratio = ai_cfg.get("price_outlier_lower_ratio", 0.3)
+        upper_ratio = ai_cfg.get("price_outlier_upper_ratio", 3.0)
+        lo = median * lower_ratio
+        hi = median * upper_ratio
+
+        removed = 0
+        keep = []
+        for r in results:
+            m = re.search(r"(\d+(?:\.\d+)?)", r.price.replace(",", ""))
+            if m:
+                val = float(m.group(1))
+                if val < lo or val > hi:
+                    removed += 1
+                    continue
+            keep.append(r)
+
+        if removed:
+            logger.info(
+                f"Price outlier filter: removed {removed} items "
+                f"(median={median:.2f}, range=[{lo:.2f}, {hi:.2f}])"
+            )
+        return keep
+
     async def _ai_filter_and_structure(self, results: list, keyword: str) -> list:
         """使用 LLM 对搜索结果进行智能过滤和结构化提取
 
         功能:
+        - 预先剔除多商品列表页（一条链接涵盖多种品牌/型号）
         - 移除与关键词语义无关的商品（如搜"iPhone"剔除安卓配件）
-        - 去除重复或高度相似的商品
+        - 去除重复商品
         - 按价格从低到高排序
         - 从标题中提取 品牌方/商品名/详细型号 结构化字段
 
@@ -690,8 +798,37 @@ class PriceFinderPlugin(Star):
             logger.info("AI filter skipped: no LLM provider available")
             return results
 
+        # 阶段0: 预过滤（多商品列表页 + 套装 + 价格异常）
+        pre_count = len(results)
+
+        # 0a: 多商品列表页
+        pre_filtered = [r for r in results if not self._is_multi_product_listing(r)]
+        list_removed = pre_count - len(pre_filtered)
+
+        # 0b: 套装/组合商品（用户搜索词本身含套装关键词时跳过此步）
+        if pre_filtered and ai_cfg.get("filter_combo_products", True) and not self._is_combo_search(keyword):
+            combo_before = len(pre_filtered)
+            pre_filtered = [r for r in pre_filtered if not self._is_combo_product(r)]
+            combo_removed = combo_before - len(pre_filtered)
+            if combo_removed:
+                logger.info(f"Combo filter: removed {combo_removed} bundle/integrated products")
+
+        # 0c: 价格异常过滤
+        if pre_filtered and ai_cfg.get("price_outlier_filter_enabled", True):
+            price_before = len(pre_filtered)
+            pre_filtered = self._filter_price_outliers(pre_filtered)
+            price_removed = price_before - len(pre_filtered)
+            if price_removed:
+                logger.info(f"Price outlier filter: removed {price_removed} items")
+
+        total_removed = pre_count - len(pre_filtered)
+        if total_removed:
+            logger.info(f"Pre-filter: {pre_count} -> {len(pre_filtered)} ({total_removed} removed)")
+        if not pre_filtered:
+            return results
+
         max_input = ai_cfg.get("ai_filter_max_input", 3000)
-        input_text = self._results_to_text(results, keyword)[:max_input]
+        input_text = self._results_to_text(pre_filtered, keyword)[:max_input]
 
         prompt = f"""你是一个商品价格分析助手。请对以下搜索结果进行分析、过滤和结构化提取。
 
@@ -702,20 +839,48 @@ class PriceFinderPlugin(Star):
 
 请完成以下任务:
 1. 剔除与搜索关键词语义完全不相关的结果（如搜索"iPhone"时剔除安卓充电器、手机壳等配件品类）
-2. 去除重复或高度相似的商品（同款不同店铺取最低价一条）
+2. 去除完全重复的商品（品牌+型号+规格完全相同才视为同款）；不同型号（如 RTX 5070 vs RTX 5070 Ti）属于不同商品，不得合并且必须全部保留
 3. 按价格从低到高排序
 4. 从每个结果的标题中提取: 品牌方、商品名、详细型号
-   - 品牌方: Apple、华为、小米、三星、Sony 等
-   - 商品名: iPhone 16 Pro、Mate 70 Pro 等核心产品名
-   - 型号: 内存/存储/颜色等规格信息（如 "256GB 沙漠金"）
+
+字段提取规则（必须严格遵守）:
+- 品牌方:
+  仅提取厂商简称，只取品牌名本身。
+  正确: Apple、华为、小米、三星、Sony、AMD、Intel、七彩虹、微星、华硕、影驰
+  错误: 不要包含产品系列/型号变体（如"AMD锐龙 9600X/9700X"）、
+        不要包含存储/颜色后缀（如"Apple 256GB"）
+  技巧: 只看标题最前面1-2个词，提取其中是品牌的部分
+
+- 商品名:
+  提取核心产品线名，能唯一标识这个商品型号。
+  正确: iPhone 16 Pro Max、RTX 5070、锐龙 7500F、B650M 主板
+  斜杠变体列表（如"5070/5070Ti"）仅用于帮助判断各字段该填什么值，
+  不影响去重——不同型号（RTX 5070 vs RTX 5070 Ti）是不同的商品，严禁合并或互相替代
+  套装/组合: 如果标题是"CPU+主板套装"，商品名应反映实际在卖的主要商品，
+        如标题"AMD锐龙 9600X 微星B850主板CPU套装"，商品名取"B850M 主板CPU套装"
+
+- 型号:
+  仅提取标题中明确写明的纯规格参数，不包含任何营销推广词汇。
+  应包含: 显存(12G/16G)、内存、存储(256GB)、颜色(沙漠金)、芯片组(B650M)、频率、核心数
+  必须删除: 推广标签（"黑神话悟空""赛博""新品""热门"）、
+          场景描述（"台式电脑游戏""竞技主播""视频直播""光追""AI 4K"）、
+          无关形容词（"水神""火神"仅在产品代号"火神"时保留）
+  严禁推测: 如果标题中未明确写明具体的规格值，该列留空。
+    错误示例: 标题"七彩虹 RTX 5070 Ti 显卡" → 型号"12G"（标题根本没提显存，凭空推测）
+    正确做法: 标题"七彩虹 RTX 5070 Ti 显卡" → 型号留空
+  如果标题中无法分离纯规格，该列留空
+
 5. 如果标题无法提取某个字段，该列留空
-6. 过滤后的结果不超过 8 条
+6. 过滤后的结果不超过 12 条
 
 输出格式（每行一个结果）:
 品牌方 | 商品名 | 型号 | 原始标题 | 价格 | 平台 | 链接
 
 示例:
 Apple | iPhone 16 Pro Max | 256GB 沙漠色 | Apple/苹果 iPhone 16 Pro Max 5G全网通 256GB | ¥9999 | 京东 | https://cu.manmanbuy.com/xxx
+七彩虹 | RTX 5070 | 12G | 七彩虹RTX 5070 12G 火神水神AD 台式电脑游戏竞技主播酷睿 | ¥5897.81元 | 京东商城 | https://cu.manmanbuy.com/xxx
+AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元 | 拼多多 | https://cu.manmanbuy.com/xxx
+微星 | B650M 主板CPU套装 | B650M | AMD锐龙 9600X 微星B850/X870主板CPU套装 其他/other | ¥1747.81元 | 天猫旗舰店 | https://cu.manmanbuy.com/xxx
 """
 
         try:
@@ -784,8 +949,48 @@ Apple | iPhone 16 Pro Max | 256GB 沙漠色 | Apple/苹果 iPhone 16 Pro Max 5G�
                 result.brand = parts[0]
                 result.product_name = parts[1]
                 result.model = parts[2]
+                # self._clean_result_fields(result)
             filtered.append(result)
         return filtered if filtered else None
+
+    def _clean_result_fields(self, result):
+         """后处理清洗 LLM 提取的 brand/product_name/model 字段
+    
+         作为 prompt 提取的 fallback 保护层，对明显不合理的字段值进行修正。
+         目前仅处理 PC 硬件品类常见问题，后续可扩展。
+    
+         Args:
+             result: 单个 PriceResult 对象（原地修改）
+         """
+         import re
+    
+         # === SEO/营销关键词黑名单（从 model 中删除） ===
+         _seo_blacklist = [
+             "台式电脑", "游戏竞技", "竞技主播", "视频直播", "光追",
+             r"AI\s*4K", "4K", "黑神话悟空", "黑神话", "悟空",
+             r"赛博\s*新品", "赛博", "新品上市", "新品", "热门",
+             "主播", "电竞", "吃鸡", "LOL", "英雄联盟",
+             "台式机", "组装电脑", "独显", "高性能",
+         ]
+         _seo_pattern = re.compile("|".join(_seo_blacklist))
+    
+         # === 品牌冗余清理 ===
+         # 常见错误: "AMD锐龙 9600X/9700X" 应修正为 "AMD"
+         # 策略: 若 brand 含数字或斜杠变体列表，截取纯品牌部分
+         brand = result.brand
+         if brand and re.search(r"\d", brand):
+             match = re.match(r"^([A-Za-z\u4e00-\u9fff]+(?:锐龙|酷睿)?)\b", brand)
+             if match:
+                 result.brand = match.group(1).strip()
+    
+         # === model SEO 清洗 ===
+         model = result.model
+         if model:
+             cleaned = _seo_pattern.sub("", model)
+             cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+             if cleaned and not re.search(r"\w", cleaned):
+                 cleaned = ""
+             result.model = cleaned
 
     def _format_output(self, results: CacheEntry, keyword: str) -> str:
         """格式化命令搜索的输出

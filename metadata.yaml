@@ -2,6 +2,6 @@ name: astrbot_plugin_pricefinder # 插件唯一识别名，以 astrbot_plugin_ �
 display_name: PriceFinder # 用于展示的名字，可以是方便人类阅读的名字
 short_desc: 从慢慢买搜索商品比价，支持 AI 过滤和语义缓存
 desc: 搜索慢慢买商品比价信息
-version: v0.2.0 # 插件版本号。格式：v1.1.1 或者 v1.1
+version: v0.2.1 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: past_windXF # 作者
 repo: https://github.com/Past-Wind/astrbot_plugin_pricefinder # 插件的仓库地址
