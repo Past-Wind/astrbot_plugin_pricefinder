@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [1.1.0] - 2026-07-04
+## [0.2.0] - 2026-07-04
 
 ### Added
 - WebUI 仪表盘：支持按品牌/价格范围/日期筛选、排序、分页浏览缓存数据
@@ -28,7 +28,7 @@
 - 命令和 LLM Tool 传递 `event.get_sender_id()` 到缓存
 - `CacheEntry.from_dict()` 自动兼容旧版缓存字段命名
 
-## [1.0.0] - 2026-06-27
+## [0.1.0] - 2026-06-27
 
 ### Added
 - 商品比价搜索：从慢慢买抓取商品价格信息
@@ -45,5 +45,5 @@
 ### Removed
 - 移除搜索设置中"启用慢慢买搜索"开关，搜索始终执行
 
-[1.1.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v1.1.0
-[1.0.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v1.0.0
+[0.2.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.2.0
+[0.1.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.1.0
