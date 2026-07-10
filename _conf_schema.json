@@ -125,5 +125,31 @@
                 "hint": "价格高于中位数 × 此值视为异常"
             }
         }
+    },
+    "debug_settings": {
+        "description": "调试设置",
+        "hint": "开启后每个操作都会输出详细日志",
+        "type": "object",
+        "items": {
+            "debug_enabled": {
+                "description": "启用调试模式",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后所有中间步骤日志输出到 AstrBot 日志"
+            }
+        }
+    },
+    "user_data_settings": {
+        "description": "用户数据设置",
+        "hint": "控制收藏夹功能的开关",
+        "type": "object",
+        "items": {
+            "favorites_enabled": {
+                "description": "启用收藏夹",
+                "type": "bool",
+                "default": true,
+                "hint": "关闭后用户将无法添加、查看和删除收藏"
+            }
+        }
     }
 }

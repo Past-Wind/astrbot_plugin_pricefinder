@@ -130,6 +130,13 @@ body {
   gap: 8px;
 }
 
+/* Header 右侧操作区 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 /* 主题切换按钮 */
 .theme-toggle {
   background: var(--surface-hover);
@@ -142,6 +149,74 @@ body {
   transition: background var(--transition);
 }
 .theme-toggle:hover { background: var(--border); }
+
+/* ================================================================
+   调试模式开关（Slider Toggle）
+   ================================================================ */
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.debug-toggle input[type="checkbox"] { display: none; }
+.debug-toggle-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  transition: background var(--transition);
+}
+.debug-toggle-slider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--transition);
+}
+.debug-toggle input:checked + .debug-toggle-slider { background: var(--primary); }
+.debug-toggle input:checked + .debug-toggle-slider::after { transform: translateX(16px); }
+
+/* ================================================================
+   Header 内嵌页面切换 Tab
+   ================================================================ */
+.header-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+  line-height: 1;
+  height: 100%;
+}
+.header-tab:hover { color: var(--text); }
+.header-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ================================================================
+   页面切换（page sections）
+   ================================================================ */
+.page {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.page.active { display: flex; }
 
 /* ================================================================
    仪表盘指标卡片（Stats Row）
@@ -454,9 +529,11 @@ body {
 /* 表格基础样式 */
 table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
+td { overflow: hidden; text-overflow: ellipsis; }
 
 /* 表头：sticky 定位，滚动时始终可见 */
 thead { position: sticky; top: 0; z-index: 1; }
@@ -496,6 +573,11 @@ tr:hover td { background: var(--surface-hover); }
   border-radius: 12px;
   font-size: 11px;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  vertical-align: middle;
 }
 .tag-brand  { background: var(--primary-light); color: var(--primary); }
 .tag-source { background: var(--info-light);    color: var(--info); }
@@ -511,6 +593,19 @@ tr:hover td { background: var(--surface-hover); }
   font-size: 12px;
 }
 .link-cell a:hover { text-decoration: underline; }
+
+.action-cell { width: 40px; text-align: center; }
+.btn-del {
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.5;
+  transition: opacity var(--transition), background var(--transition);
+}
+.btn-del:hover { opacity: 1; background: var(--danger-light); }
 
 /* ================================================================
    分页栏（Pagination）
@@ -630,6 +725,42 @@ tr:hover td { background: var(--surface-hover); }
 .toast.error {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* ================================================================
+   滚动条深色模式沉浸（全局覆盖所有可滚动区域）
+   ================================================================ */
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.filter-group .checkbox-list::-webkit-scrollbar {
+  width: 5px;
+}
+.filter-group .checkbox-list::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 /* ================================================================

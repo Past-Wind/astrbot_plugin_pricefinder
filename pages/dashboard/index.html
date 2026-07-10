@@ -4,79 +4,99 @@
   遵循 AstrBot 插件 Pages 规范，由 Dashboard 通过 iframe 嵌入。
   Bridge: window.AstrBotPluginPage 提供 API 通信和主题/语言同步。
   入口脚本: app.js（ES module）
+  三页合一：商品比价 / 查询历史 / 收藏夹，Header Tab 切换
 -->
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PriceFinder</title>
-  <!-- 外部样式表：遵循 AstrBot 相对路径规范 -->
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
 
 <!-- ====== 顶部导航栏 ====== -->
 <header class="header">
-  <!-- 左侧：logo + 标题 -->
   <div class="header-title">
     PriceFinder 商品比价
   </div>
-  <!-- 右侧：主题切换按钮（JS 控制文字和主题状态） -->
-  <button class="theme-toggle" id="themeBtn">🌙 暗色模式</button>
+  <div class="header-actions">
+    <label class="debug-toggle" title="调试模式">
+      <span class="debug-toggle-label">调试模式</span>
+      <input type="checkbox" id="debugToggle" />
+      <span class="debug-toggle-slider"></span>
+    </label>
+    <button class="header-tab active" data-page="dashboard">🔍 商品比价</button>
+    <button class="header-tab" data-page="favorites">⭐ 收藏夹</button>
+    <button class="theme-toggle" id="themeBtn">🌙 暗色模式</button>
+  </div>
 </header>
 
-<!-- ====== 仪表盘指标卡片区 ====== -->
-<!-- 由 app.js renderStats() 动态渲染四个指标卡片 -->
-<section class="stats-row" id="statsRow"></section>
+<!-- ====== Page: 商品比价（默认） ====== -->
+<section class="page active" id="page-dashboard">
 
-<!-- ====== 搜索栏 ====== -->
-<!-- 全宽输入框 + 内嵌清除/搜索按钮 -->
-<div class="search-bar">
-  <div class="search-input-wrap">
-    <input type="text" id="searchInput" placeholder="搜索关键词、品牌、商品名..." />
-    <!-- ✕ 清除按钮：输入框有内容时才显示 -->
-    <button class="btn-reset" id="btnReset" title="清除">✕</button>
-    <!-- 🔍 搜索按钮 -->
-    <button class="btn-search" id="btnSearch" title="搜索">🔍</button>
-  </div>
-</div>
+  <section class="stats-row" id="dashboardStats"></section>
 
-<!-- ====== 主体内容区（侧边栏 + 表格） ====== -->
-<div class="main-grid">
-
-  <!-- 左侧：筛选器侧边栏 -->
-  <!-- 由 app.js renderSidebar() 动态渲染筛选分组 -->
-  <aside class="sidebar" id="sidebar"></aside>
-
-  <!-- 右侧：数据表格区域 -->
-  <div class="table-area">
-    <!-- 表格工具栏：显示记录总数 -->
-    <div class="table-toolbar">
-      <span class="table-info" id="tableInfo">共 <strong>0</strong> 条记录</span>
+  <div class="search-bar">
+    <div class="search-input-wrap">
+      <input type="text" id="dashboardSearchInput" placeholder="搜索关键词、品牌、商品名..." />
+      <button class="btn-reset" id="dashboardBtnReset" title="清除">✕</button>
+      <button class="btn-search" id="dashboardBtnSearch" title="搜索">🔍</button>
     </div>
-    <!-- 表格水平滚动容器 -->
-    <div class="table-scroll">
-      <table>
-        <!-- 表头：由 app.js renderTableHead() 动态生成 -->
-        <thead id="tableHead"></thead>
-        <!-- 表体：由 app.js renderTableBody() 动态生成 -->
-        <tbody id="tableBody"></tbody>
-      </table>
-    </div>
-    <!-- 分页栏：页码 + 每页条数选择器 + 翻页按钮 -->
-    <div class="pagination" id="pagination"></div>
   </div>
 
-</div>
+  <div class="main-grid">
+    <aside class="sidebar" id="dashboardSidebar"></aside>
+    <div class="table-area">
+      <div class="table-toolbar">
+        <span class="table-info" id="dashboardTableInfo">共 <strong>0</strong> 条记录</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead id="dashboardTableHead"></thead>
+          <tbody id="dashboardTableBody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="dashboardPagination"></div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ====== Page: 收藏夹 ====== -->
+<section class="page" id="page-favorites">
+
+  <section class="stats-row" id="favStats"></section>
+
+  <div class="search-bar">
+    <div class="search-input-wrap">
+      <input type="text" id="favSearchInput" placeholder="搜索关键词、品牌、商品名..." />
+      <button class="btn-reset" id="favBtnReset" title="清除">✕</button>
+      <button class="btn-search" id="favBtnSearch" title="搜索">🔍</button>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <aside class="sidebar" id="favSidebar"></aside>
+    <div class="table-area">
+      <div class="table-toolbar">
+        <span class="table-info" id="favTableInfo">共 <strong>0</strong> 条记录</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead id="favTableHead"></thead>
+          <tbody id="favTableBody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="favPagination"></div>
+    </div>
+  </div>
+
+</section>
 
 <!-- ====== Toast 通知浮层 ====== -->
-<!-- 由 app.js showToast() 控制显示/隐藏 -->
 <div class="toast" id="toast"></div>
 
-<!--
-  入口脚本：使用 type="module" 确保 ES module 语法可用。
-  AstrBot 会自动注入 bridge-sdk.js 提供 window.AstrBotPluginPage。
--->
 <script type="module" src="./app.js"></script>
 
 </body>

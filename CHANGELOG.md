@@ -5,6 +5,30 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-07-10
+
+### Added
+- 用户历史记录：`/price history` 命令查看最近50条查询，`HistoryHelper` 类复用缓存数据，无须额外存储
+- 收藏夹功能：`FavoritesManager` 类（`favorites.json` 持久化），支持 `/price fav add <序号>` 从搜索结果收藏、`/price fav list` 查看列表、`/price fav remove <序号>` 删除，别名 `我的收藏` / `取消收藏`
+- 帮助指南：`/price` 和 `/price help` 输出完整中文指令使用指南（`HELP_TEXT` 模块常量）
+- WebUI 双 Tab 页面：商品比价（默认）+ 收藏夹，Header 内嵌 Tab 切换，每个 Tab 独立 stats/sidebar/table
+- 调试模式：`debug_settings` 配置项（`debug_enabled` 开关），`_log()` 统一日志方法，WebUI 实时切换
+- 缓存条目删除：WebUI 商品比价 Tab 每行 🗑️ 按钮，`POST /page/cache-delete` API 端点，`CacheManager.remove()` 方法
+- 悬停完整显示：表格文字溢出列自动追加 `title` 属性，鼠标悬停显示完整内容
+- WebAPI 路由：`/page/history`、`/page/favorites`、`/page/history-filters`、`/page/favorites-filters`、`/page/debug-config`、`/page/cache-delete`
+- `FavoriteItem` 数据类：收藏条目序列化与反序列化
+- `_last_search` 内存暂存：`price_search` 完成后保存用户最近搜索结果
+
+### Changed
+- WebUI 从独立 `pages/manage/` 目录合并到 `pages/dashboard/`，三页合一（商品比价 / 查询历史 / 收藏夹），后简化为双 Tab
+- 删除 `pages/manage/` 整个目录
+- 移除 `history_enabled` 配置项，历史功能始终启用
+- 品牌标签样式修复：`.tag` 追加 `white-space: nowrap` / `overflow: hidden` / `text-overflow: ellipsis` / `max-width: 100%`，消除水平滚动条
+- 全局滚动条深色模式沉浸：`::-webkit-scrollbar` + Firefox `scrollbar-width: thin`
+
+### Fixed
+- 修复品牌名换行导致表格水平滚动条（`.tag` inline-block 截断）
+
 ## [0.2.1] - 2026-07-08
 
 ### Added
@@ -59,6 +83,7 @@
 ### Removed
 - 移除搜索设置中"启用慢慢买搜索"开关，搜索始终执行
 
+[0.3.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Past-Wind/astrbot_plugin_pricefinder/releases/tag/v0.1.0

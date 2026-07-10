@@ -64,6 +64,57 @@ class PriceResult:
 
 
 @dataclass
+class FavoriteItem:
+    """收藏条目数据类
+
+    Attributes:
+        user_id: 收藏用户 ID
+        title: 商品原始标题
+        brand: 品牌方
+        product_name: 商品名
+        model: 商品详细型号
+        price: 商品价格
+        price_source: 售价来源
+        url: 商品详情页链接
+        query_source: 查价来源
+        history_low: 历史最低价
+        created_at: 收藏时间戳（epoch 秒）
+    """
+    user_id: str
+    title: str
+    brand: str = ""
+    product_name: str = ""
+    model: str = ""
+    price: str = ""
+    price_source: str = ""
+    url: str = ""
+    query_source: str = ""
+    history_low: str = ""
+    created_at: float = 0.0
+
+    def to_dict(self):
+        """序列化为字典，用于 JSON 持久化"""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FavoriteItem":
+        """从字典反序列化，兼容缺少字段的旧版数据"""
+        d = dict(d)
+        d.setdefault("user_id", "")
+        d.setdefault("title", "")
+        d.setdefault("brand", "")
+        d.setdefault("product_name", "")
+        d.setdefault("model", "")
+        d.setdefault("price", "")
+        d.setdefault("price_source", "")
+        d.setdefault("url", "")
+        d.setdefault("query_source", "")
+        d.setdefault("history_low", "")
+        d.setdefault("created_at", 0.0)
+        return cls(**d)
+
+
+@dataclass
 class CacheEntry:
     """缓存条目数据类，存储一次搜索的完整结果
 
@@ -129,6 +180,232 @@ class EmbeddingIndex:
     query: str
     vector: list
     cache_key: str
+
+
+
+class FavoritesManager:
+    """收藏管理器，负责用户收藏的持久化和检索
+
+    使用 JSON 文件持久化收藏数据。
+    支持功能:
+    - 添加/删除收藏
+    - 按用户查询收藏列表
+    - 关键词/用户/时间范围筛选
+    """
+
+    def __init__(self, file_path: Path):
+        """初始化收藏管理器，从磁盘加载现有收藏
+
+        Args:
+            file_path: 收藏数据文件路径
+        """
+        self.file_path = file_path
+        self.items: list[FavoriteItem] = []
+        self._load()
+
+    def _load(self):
+        """从磁盘加载收藏数据
+
+        从 JSON 文件反序列化 FavoriteItem 列表。
+        文件不存在或解析失败时静默重置为空列表，仅打印警告。
+        """
+        try:
+            if self.file_path.exists():
+                with open(self.file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.items = [FavoriteItem.from_dict(item) for item in data]
+        except Exception as e:
+            logger.warning(f"Failed to load favorites: {e}")
+            self.items = []
+
+    def _save(self):
+        """将收藏数据持久化到磁盘
+
+        序列化所有 FavoriteItem 为 JSON 写入文件。
+        自动创建父目录，写入失败打印警告（不阻断业务流程）。
+        """
+        try:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump([item.to_dict() for item in self.items], f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save favorites: {e}")
+
+    def add(self, user_id: str, result) -> bool:
+        """添加收藏
+
+        Args:
+            user_id: 用户 ID
+            result: PriceResult 对象
+
+        Returns:
+            True 表示新增成功，False 表示已存在
+        """
+        item = FavoriteItem(
+            user_id=user_id,
+            title=result.title,
+            brand=result.brand,
+            product_name=result.product_name,
+            model=result.model,
+            price=result.price,
+            price_source=result.price_source,
+            url=result.url,
+            query_source=result.query_source,
+            history_low=result.history_low,
+            created_at=time.time(),
+        )
+        for existing in self.items:
+            # 重复判定：同一用户 + 同一商品链接 = 已收藏，返回 False
+            if existing.user_id == user_id and existing.url == result.url:
+                return False
+        self.items.append(item)
+        self._save()
+        return True
+
+    def remove(self, user_id: str, index: int) -> bool:
+        """删除收藏
+
+        Args:
+            user_id: 用户 ID
+            index: 用户收藏列表中的序号（1-indexed）
+
+        Returns:
+            True 表示删除成功，False 表示序号无效
+        """
+        user_items = [(i, item) for i, item in enumerate(self.items) if item.user_id == user_id]
+        if index < 1 or index > len(user_items):
+            return False
+        real_index = user_items[index - 1][0]  # 用户视角的 1-indexed 序号 → 全局 items 列表真实索引
+        self.items.pop(real_index)
+        self._save()
+        return True
+
+    def list_by_user(self, user_id: str) -> list:
+        """获取指定用户的收藏列表
+
+        Args:
+            user_id: 用户 ID
+
+        Returns:
+            FavoriteItem 列表（按收藏时间倒序）
+        """
+        return [item for item in self.items if item.user_id == user_id]
+
+    def get_all(self, filters: dict | None = None) -> list:
+        """获取所有收藏记录（支持筛选）
+
+        Args:
+            filters: 可选筛选条件，支持 keyword, user_id, time_range
+
+        Returns:
+            字典列表，按收藏时间倒序
+        """
+        filters = filters or {}
+        results = []
+        for item in self.items:
+            record = {
+                "user_id": item.user_id,
+                "title": item.title,
+                "brand": item.brand,
+                "product_name": item.product_name,
+                "model": item.model,
+                "price": item.price,
+                "price_source": item.price_source,
+                "url": item.url,
+                "query_source": item.query_source,
+                "history_low": item.history_low,
+                "created_at": item.created_at,
+            }
+            results.append(record)
+        results.sort(key=lambda x: x["created_at"], reverse=True)
+
+        # === 关键词模糊筛选：匹配品牌/商品名/型号/标题/售价来源 ===
+        keyword = (filters.get("keyword") or "").lower()
+        if keyword:
+            results = [r for r in results if
+                keyword in (r.get("brand") or "").lower() or
+                keyword in (r.get("product_name") or "").lower() or
+                keyword in (r.get("model") or "").lower() or
+                keyword in (r.get("title") or "").lower() or
+                keyword in (r.get("price_source") or "").lower()]
+        # === 用户 ID 精确筛选 ===
+        uid = filters.get("user_id")
+        if uid:
+            results = [r for r in results if r.get("user_id") == uid]
+
+        # === 时间范围筛选：today / 7d / 30d ===
+        time_range = filters.get("time_range", "")
+        if time_range and time_range != "all":
+            now = time.time()
+            ranges = {"today": 86400, "7d": 604800, "30d": 2592000}
+            cutoff = now - ranges.get(time_range, 0)
+            results = [r for r in results if r["created_at"] >= cutoff]
+
+        return results
+
+    def get_filter_options(self) -> dict:
+        """返回收藏筛选器可选项（品牌、售价来源、用户的去重列表）"""
+        brands = set()
+        price_sources = set()
+        users = set()
+        for item in self.items:
+            if item.brand:
+                brands.add(item.brand)
+            if item.price_source:
+                price_sources.add(item.price_source)
+            if item.user_id:
+                users.add(item.user_id)
+        return {
+            "brands": sorted(brands),
+            "price_sources": sorted(price_sources),
+            "users": sorted(users),
+        }
+
+    def count(self) -> int:
+        """返回收藏总数"""
+        return len(self.items)
+
+
+class HistoryHelper:
+    """查询历史辅助类
+
+    纯读工具，不创建额外存储——所有数据来自 CacheManager.entries，
+    按 user_id 过滤后展平每个缓存条目的搜索结果。
+    无实例状态，所有方法均为静态方法。
+    """
+
+    @staticmethod
+    def get_user_history(cache, user_id: str, limit: int = 50) -> list:
+        """获取指定用户的查询历史
+
+        Args:
+            cache: CacheManager 实例
+            user_id: 用户 ID
+            limit: 最大返回条数
+
+        Returns:
+            字典列表，按时间倒序
+        """
+        results = []
+        for entry in cache.entries.values():
+            if entry.user_id == user_id:
+                for r in entry.manmanbuy_results:
+                    results.append({
+                        "query": entry.query,
+                        "user_id": entry.user_id,
+                        "timestamp": entry.timestamp,
+                        "title": r.title,
+                        "brand": r.brand,
+                        "product_name": r.product_name,
+                        "model": r.model,
+                        "price": r.price,
+                        "price_source": r.price_source,
+                        "url": r.url,
+                        "query_source": r.query_source,
+                        "history_low": r.history_low,
+                    })
+        results.sort(key=lambda x: x["timestamp"], reverse=True)
+        return results[:limit]
 
 
 class CacheManager:
@@ -403,7 +680,7 @@ class CacheManager:
         """
         if ttl_days <= 0:
             return
-        ttl_seconds = ttl_days * 86400  # 86400 = 24 * 60 * 60（秒/天）
+        ttl_seconds = ttl_days * 86400
         now = time.time()
         expired_keys = [k for k, v in self.entries.items() if (now - v.timestamp) > ttl_seconds]
         for key in expired_keys:
@@ -412,6 +689,16 @@ class CacheManager:
         if expired_keys:
             self._save()
             logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+    def remove(self, key: str):
+        """删除指定缓存条目
+
+        Args:
+            key: 缓存键
+        """
+        self.entries.pop(key, None)
+        self.index = [idx for idx in self.index if idx.cache_key != key]
+        self._save()
 
 
 def _cosine_similarity(a: list, b: list) -> float:
@@ -457,6 +744,23 @@ _COMBO_KEYWORDS = [
 ]
 
 
+# 模块级帮助文本，由 /price 及 /price help 命令输出
+# 展示所有可用命令及使用示例，供用户快速上手
+HELP_TEXT = (
+    "📋 PriceFinder 查价插件使用指南\n\n"
+    "🔍 /price search <关键词> — 搜索商品比价\n"
+    "   示例: /price search iPhone 16\n\n"
+    "📖 /price history — 查看我的查询历史（最近50条）\n\n"
+    "⭐ 收藏管理:\n"
+    "   /price fav add <序号>    — 收藏上次搜索结果的第N条\n"
+    "   /price fav list           — 查看我的收藏列表\n"
+    "   取消收藏 <序号>            — 删除指定收藏（或 /price fav remove <序号>）\n\n"
+    "💡 提示:\n"
+    "   - 搜索结果缓存24小时，相同关键词不会重复爬取\n"
+    "   - 可以使用自然语言提问：\"帮我查一下 RTX 5070 的价格\""
+)
+
+
 @register("pricefinder", "past_windXF", "搜索慢慢买商品比价信息", "1.0.0")
 class PriceFinderPlugin(Star):
     """PriceFinder 插件主类
@@ -477,6 +781,8 @@ class PriceFinderPlugin(Star):
         self.config = config
         self.client: httpx.AsyncClient | None = None  # HTTP 客户端
         self.cache: CacheManager | None = None  # 缓存管理器
+        self.favorites: FavoritesManager | None = None  # 收藏管理器
+        self._last_search: dict = {}  # 用户最近一次搜索结果（user_id -> [PriceResult, ...]）
 
     async def initialize(self):
         """初始化插件资源
@@ -490,6 +796,7 @@ class PriceFinderPlugin(Star):
             cache_file=cache_dir / "cache.json",
             embedding_file=cache_dir / "embeddings.json",
         )
+        self.favorites = FavoritesManager(cache_dir / "favorites.json")
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(self.config.get("network_settings", {}).get("timeout", 15)),
             follow_redirects=True,
@@ -502,6 +809,23 @@ class PriceFinderPlugin(Star):
         if self.client:
             await self.client.aclose()
         logger.info("PriceFinder plugin terminated")
+
+    def _log(self, msg: str, level: str = "info"):
+        """插件统一日志方法
+
+        根据调试配置自动切换日志标识：
+        - debug_enabled=False 时：前缀 [PriceFinder]，始终使用 info 级别
+        - debug_enabled=True  时：前缀 [PriceFinder DEBUG]，使用传入的 level
+
+        Args:
+            msg: 日志消息文本
+            level: 日志级别（debug / info / warning / error），默认 info
+        """
+        prefix = "[PriceFinder]"
+        if self.config.get("debug_settings", {}).get("debug_enabled", False):
+            prefix = "[PriceFinder DEBUG]"
+        log_func = getattr(logger, level, logger.info)
+        log_func(f"{prefix} {msg}")
 
     async def _fetch(self, url: str) -> str | None:
         """发起 HTTP GET 请求
@@ -524,6 +848,7 @@ class PriceFinderPlugin(Star):
         retry_count = net.get("retry_count", 2)
         for attempt in range(retry_count + 1):
             try:
+                self._log(f"Fetching: {url}", "info")
                 resp = await self.client.get(url, headers=headers)
                 if resp.status_code == 200:
                     return resp.text
@@ -677,6 +1002,7 @@ class PriceFinderPlugin(Star):
                 logger.warning(f"Failed to parse ManManBuy item: {e}")
                 continue
 
+        self._log(f"Parsed {len(results)} results from ManManBuy", "info")
         return results
 
     @staticmethod
@@ -762,7 +1088,7 @@ class PriceFinderPlugin(Star):
             keep.append(r)
 
         if removed:
-            logger.info(
+            self._log(
                 f"Price outlier filter: removed {removed} items "
                 f"(median={median:.2f}, range=[{lo:.2f}, {hi:.2f}])"
             )
@@ -795,7 +1121,7 @@ class PriceFinderPlugin(Star):
 
         provider = self._get_llm_provider()
         if provider is None:
-            logger.info("AI filter skipped: no LLM provider available")
+            self._log("AI filter skipped: no LLM provider available", "info")
             return results
 
         # 阶段0: 预过滤（多商品列表页 + 套装 + 价格异常）
@@ -803,7 +1129,6 @@ class PriceFinderPlugin(Star):
 
         # 0a: 多商品列表页
         pre_filtered = [r for r in results if not self._is_multi_product_listing(r)]
-        list_removed = pre_count - len(pre_filtered)
 
         # 0b: 套装/组合商品（用户搜索词本身含套装关键词时跳过此步）
         if pre_filtered and ai_cfg.get("filter_combo_products", True) and not self._is_combo_search(keyword):
@@ -811,7 +1136,7 @@ class PriceFinderPlugin(Star):
             pre_filtered = [r for r in pre_filtered if not self._is_combo_product(r)]
             combo_removed = combo_before - len(pre_filtered)
             if combo_removed:
-                logger.info(f"Combo filter: removed {combo_removed} bundle/integrated products")
+                self._log(f"Combo filter: removed {combo_removed} bundle/integrated products")
 
         # 0c: 价格异常过滤
         if pre_filtered and ai_cfg.get("price_outlier_filter_enabled", True):
@@ -819,11 +1144,11 @@ class PriceFinderPlugin(Star):
             pre_filtered = self._filter_price_outliers(pre_filtered)
             price_removed = price_before - len(pre_filtered)
             if price_removed:
-                logger.info(f"Price outlier filter: removed {price_removed} items")
+                self._log(f"Price outlier filter: removed {price_removed} items")
 
         total_removed = pre_count - len(pre_filtered)
         if total_removed:
-            logger.info(f"Pre-filter: {pre_count} -> {len(pre_filtered)} ({total_removed} removed)")
+            self._log(f"Pre-filter: {pre_count} -> {len(pre_filtered)} ({total_removed} removed)")
         if not pre_filtered:
             return results
 
@@ -890,7 +1215,7 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
             )
             structured = self._parse_ai_response_structured(response.completion_text, results)
             if structured:
-                logger.info(f"AI filter+structure: {len(results)} -> {len(structured)} results")
+                self._log(f"AI filter+structure: {len(results)} -> {len(structured)} results")
                 return structured
         except Exception as e:
             logger.warning(f"AI filter failed, using raw results: {e}")
@@ -1059,10 +1384,11 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
         has_cache, cached = await self.has_query(keyword)
         if has_cache and cached:
             cache_age_days = (time.time() - cached.timestamp) / 86400
-            logger.info(f"Cache hit for '{keyword}' (age: {cache_age_days:.1f} days)")
+            self._log(f"Cache hit for '{keyword}' (age: {cache_age_days:.1f} days)", "info")
             return cached
 
         # 步骤 3a：缓存未命中 → 爬取慢慢买原始数据
+        self._log(f"Cache miss for '{keyword}', fetching from ManManBuy", "info")
         manmanbuy_results = await self._search_manmanbuy(keyword)
 
         # 步骤 3b：LLM 过滤无关结果 + 提取品牌/商品名/型号
@@ -1091,10 +1417,15 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
         前端通过 bridge.apiGet("page/stats") 调用，
         Dashboard 转发到 /api/plug/{PLUGIN_NAME}/page/stats
 
-        三个端点：
-        - /page/stats   → 仪表盘指标（总条目、查询次数、活跃用户）
-        - /page/search  → 按条件搜索缓存结果（支持 keyword/price_source/time_range）
-        - /page/filters → 返回筛选器可选项（品牌、来源等去重列表）
+        端点：
+        - /page/stats            → 仪表盘指标
+        - /page/search           → 按条件搜索缓存结果
+        - /page/filters          → 缓存筛选器可选项
+        - /page/history          → 用户查询历史
+        - /page/favorites        → 用户收藏列表
+        - /page/history-filters  → 历史筛选器可选项
+        - /page/favorites-filters → 收藏筛选器可选项
+        - /page/debug-config     → 调试配置读写
         """
         self.context.register_web_api(
             f"/{PLUGIN_NAME}/page/stats",
@@ -1114,9 +1445,49 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
             ["GET"],
             "PriceFinder Page filter options",
         )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/history",
+            self._page_history,
+            ["GET"],
+            "PriceFinder Page history",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/favorites",
+            self._page_favorites,
+            ["GET"],
+            "PriceFinder Page favorites",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/history-filters",
+            self._page_history_filters,
+            ["GET"],
+            "PriceFinder Page history filter options",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/favorites-filters",
+            self._page_favorites_filters,
+            ["GET"],
+            "PriceFinder Page favorites filter options",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/debug-config",
+            self._page_debug_config,
+            ["GET", "POST"],
+            "PriceFinder Page debug config",
+        )
+        self.context.register_web_api(
+            f"/{PLUGIN_NAME}/page/cache-delete",
+            self._page_cache_delete,
+            ["POST"],
+            "PriceFinder Page cache entry delete",
+        )
 
     async def _page_stats(self):
-        """仪表盘统计信息"""
+        """仪表盘统计信息
+
+        返回格式：{"total_entries": N, "total_queries": N, "today_queries": N, "active_users": N}
+        cache 未初始化时返回全零结构。
+        """
         if self.cache is None:
             return jsonify({"total_entries": 0, "total_queries": 0, "today_queries": 0, "active_users": 0})
         return jsonify(self.cache.get_stats())
@@ -1138,16 +1509,17 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
         price_source = (request.args.get("price_source") or "").strip()
         time_range = (request.args.get("time_range") or "").strip()
 
-        # 关键词和价格来源传给 CacheManager 的文本匹配
+        # 关键词和价格来源传给 CacheManager 的文本+相等匹配
         if keyword:
             filters["keyword"] = keyword
         if price_source:
             filters["price_source"] = price_source
 
+        # 调用 CacheManager 执行内置筛选（关键词/品牌/价格来源/用户 ID）
         results = self.cache.get_all_results(filters)
 
-        # 时间范围：CacheManager 未内置此筛选，在后端手动过滤
-        # 86400 = 每天秒数，604800 = 7天，2592000 = 30天
+        # 时间范围筛选：CacheManager 未内置，由 WebAPI 层手动过滤
+        # 86400 = 24h 秒数，604800 = 7d，2592000 = 30d
         if time_range and time_range != "all":
             now = time.time()
             ranges = {"today": 86400, "7d": 604800, "30d": 2592000}
@@ -1157,14 +1529,138 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
         return jsonify(results)
 
     async def _page_filters(self):
-        """返回筛选器可选项"""
+        """返回缓存筛选器可选项
+
+        返回值：{"brands": [...], "price_sources": [...], "query_sources": [...], "users": [...]}
+        所有列表去重排序，供前端下拉选择器使用。
+        cache 未初始化时返回空列表。
+        """
         if self.cache is None:
             return jsonify({"brands": [], "price_sources": [], "query_sources": []})
         return jsonify(self.cache.get_filter_options())
 
+    async def _page_history(self):
+        """按条件查询搜索历史
+
+        Query 参数：
+        - keyword:    模糊搜索关键词
+        - user_id:    按用户 ID 筛选
+        - time_range: 时间范围（today / 7d / 30d / all）
+
+        返回：展平的历史记录列表（JSON 数组）
+        """
+        # cache 未就绪时返回空数组
+        if self.cache is None:
+            return jsonify([])
+        # 收集筛选参数
+        filters = {}
+        keyword = (request.args.get("keyword") or "").strip()
+        user_id = (request.args.get("user_id") or "").strip()
+        time_range = (request.args.get("time_range") or "").strip()
+        if keyword:
+            filters["keyword"] = keyword
+        if user_id:
+            filters["user_id"] = user_id
+
+        results = self.cache.get_all_results(filters)
+
+        # 时间范围手动过滤
+        if time_range and time_range != "all":
+            now = time.time()
+            ranges = {"today": 86400, "7d": 604800, "30d": 2592000}
+            cutoff = now - ranges.get(time_range, 0)
+            results = [r for r in results if r["timestamp"] >= cutoff]
+        return jsonify(results)
+
+    async def _page_favorites(self):
+        """按条件查询收藏列表
+
+        Query 参数：
+        - keyword:    模糊搜索关键词
+        - user_id:    按用户 ID 筛选
+        - time_range: 时间范围（today / 7d / 30d / all）
+
+        返回：收藏记录列表（JSON 数组），含 created_at 时间戳
+        """
+        # 管理员关闭收藏功能或 favorites 未就绪时返回空数组
+        user_cfg = self.config.get("user_data_settings", {})
+        if not user_cfg.get("favorites_enabled", True):
+            return jsonify([])
+        if self.favorites is None:
+            return jsonify([])
+        filters = {}
+        keyword = (request.args.get("keyword") or "").strip()
+        user_id = (request.args.get("user_id") or "").strip()
+        time_range = (request.args.get("time_range") or "").strip()
+        if keyword:
+            filters["keyword"] = keyword
+        if user_id:
+            filters["user_id"] = user_id
+        if time_range:
+            filters["time_range"] = time_range
+        return jsonify(self.favorites.get_all(filters))
+
+    async def _page_history_filters(self):
+        """返回搜索历史筛选器可选项
+
+        返回值：{"brands": [...], "price_sources": [...], "query_sources": [...], "users": [...]}
+        历史功能被关闭或 cache 未初始化时返回空列表。
+        """
+        # cache 未初始化时返回空结构
+        if self.cache is None:
+            return jsonify({"brands": [], "price_sources": [], "query_sources": [], "users": []})
+        return jsonify(self.cache.get_filter_options())
+
+    async def _page_favorites_filters(self):
+        """返回收藏筛选器可选项
+
+        返回值：{"brands": [...], "price_sources": [...], "users": [...]}
+        收藏功能被关闭或 favorites 未初始化时返回空列表。
+        """
+        # favorites 未就绪或管理员关闭收藏功能时返回空结构
+        if self.favorites is None:
+            return jsonify({"brands": [], "price_sources": [], "users": []})
+        user_cfg = self.config.get("user_data_settings", {})
+        if not user_cfg.get("favorites_enabled", True):
+            return jsonify({"brands": [], "price_sources": [], "users": []})
+        return jsonify(self.favorites.get_filter_options())
+
+    async def _page_debug_config(self):
+        """调试配置读写
+
+        GET：返回 {"debug_enabled": true/false}
+        POST：请求体 {"debug_enabled": bool} → 更新配置并返回 {"debug_enabled": N, "ok": true}
+        """
+        if request.method == "POST":
+            body = await request.get_json()
+            debug_enabled = body.get("debug_enabled", False)
+            self.config["debug_settings"] = self.config.get("debug_settings", {})
+            self.config["debug_settings"]["debug_enabled"] = debug_enabled
+            return jsonify({"debug_enabled": debug_enabled, "ok": True})
+        debug_enabled = self.config.get("debug_settings", {}).get("debug_enabled", False)
+        return jsonify({"debug_enabled": debug_enabled})
+
+    async def _page_cache_delete(self):
+        """删除指定缓存条目
+
+        请求体 JSON：{"cache_key": "关键词"}
+        返回：{"ok": true, "deleted": N} 或 {"ok": false, "error": "..."}
+        """
+        body = await request.get_json()
+        cache_key = (body.get("cache_key") or "").strip()
+        if not cache_key:
+            return jsonify({"ok": False, "error": "cache_key is required"})
+        if self.cache is None:
+            return jsonify({"ok": False, "error": "cache not initialized"})
+        self.cache.remove(cache_key)
+        return jsonify({"ok": True, "deleted": cache_key})
+
     @filter.command_group("price")
     def price(self):
-        """价格搜索命令组入口"""
+        """价格搜索命令组入口
+
+        子命令：search（搜索）、help（帮助）、history（历史）、fav（收藏管理）
+        """
         pass
 
     @price.command("search")
@@ -1183,6 +1679,7 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
         user_id = event.get_sender_id()
         results = await self._do_search(keyword, user_id)
         all_results = results.manmanbuy_results
+        self._last_search[user_id] = all_results
 
         if all_results:
             output = self._format_output(results, keyword)
@@ -1190,6 +1687,123 @@ AMD | 锐龙 7500F | | AMD 7500F/9600X/9700X R5 7500F 盒装处理器 | ¥719元
             output = f'🔍 搜索 "{keyword}" 未找到相关商品'
 
         yield event.plain_result(output)
+
+    @price.command("help")
+    async def price_help(self, event: AstrMessageEvent):
+        """/price help 查看帮助"""
+        yield event.plain_result(HELP_TEXT)
+
+    @price.command("history")
+    async def price_history(self, event: AstrMessageEvent):
+        """/price history — 查看当前用户的查询历史（最近 50 条）"""
+        user_id = event.get_sender_id()
+        history = HistoryHelper.get_user_history(self.cache, user_id)
+        if not history:
+            yield event.plain_result("你还没有查询历史记录。")
+            return
+        lines = [f"📖 你的查询历史（最近 {len(history)} 条）:\n"]
+        for i, h in enumerate(history, 1):
+            lines.append(f"{i}. [{h['query']}] {h['title']} — {h['price']} | {h['price_source']}")
+            from datetime import datetime
+            t = datetime.fromtimestamp(h['timestamp']).strftime("%m-%d %H:%M")
+            lines.append(f"   🕐 {t}")
+        yield event.plain_result("\n".join(lines))
+
+    @price.command("fav")
+    async def price_fav(self, event: AstrMessageEvent, action: str = "", index: str = ""):
+        """/price fav — 收藏管理（add 添加 / list 查看 / remove 删除）"""
+        user_cfg = self.config.get("user_data_settings", {})
+        if not user_cfg.get("favorites_enabled", True):
+            yield event.plain_result("收藏夹功能已被管理员关闭。")
+            return
+        user_id = event.get_sender_id()
+        # === 路由分发：根据 action 参数执行收藏的增/查/删操作 ===
+        if action == "add":
+            # 添加收藏：从上次搜索结果的指定序号中选取
+            try:
+                idx = int(index)
+            except (ValueError, TypeError):
+                yield event.plain_result("用法: /price fav add <序号>\n请先使用 /price search 搜索后再收藏。")
+                return
+            last = self._last_search.get(user_id, [])
+            if not last:
+                yield event.plain_result("请先使用 /price search <关键词> 搜索商品，再使用 /price fav add <序号> 收藏。")
+                return
+            if idx < 1 or idx > len(last):
+                yield event.plain_result(f"序号超出范围，上次搜索共 {len(last)} 条结果。")
+                return
+            result = last[idx - 1]
+            ok = self.favorites.add(user_id, result)
+            if ok:
+                yield event.plain_result(f"已收藏: {result.title} — {result.price}")
+            else:
+                yield event.plain_result("该商品已在收藏夹中。")
+        elif action == "list":
+            # 列出当前用户的所有收藏（按创建时间倒序）
+            items = self.favorites.list_by_user(user_id)
+            if not items:
+                yield event.plain_result("你的收藏夹为空。")
+                return
+            lines = [f"⭐ 你的收藏（共 {len(items)} 条）:\n"]
+            for i, item in enumerate(items, 1):
+                lines.append(f"{i}. {item.title} — {item.price} | {item.price_source}")
+                from datetime import datetime
+                t = datetime.fromtimestamp(item.created_at).strftime("%m-%d %H:%M")
+                lines.append(f"   🕐 收藏于 {t} | 🔗 {item.url}")
+            yield event.plain_result("\n".join(lines))
+        elif action == "remove":
+            # 取消收藏：按收藏列表中的序号删除
+            try:
+                idx = int(index)
+            except (ValueError, TypeError):
+                yield event.plain_result("用法: /price fav remove <序号> 或 取消收藏 <序号>")
+                return
+            ok = self.favorites.remove(user_id, idx)
+            if ok:
+                yield event.plain_result(f"已取消收藏第 {idx} 条。")
+            else:
+                yield event.plain_result("序号无效，请使用 /price fav list 查看收藏列表。")
+        else:
+            yield event.plain_result("用法:\n  /price fav add <序号> — 收藏上次搜索结果的第N条\n  /price fav list — 查看收藏列表\n  /price fav remove <序号> — 取消收藏")
+
+    @filter.command("我的收藏")
+    async def my_fav(self, event: AstrMessageEvent):
+        """"我的收藏"命令，查看收藏列表"""
+        user_cfg = self.config.get("user_data_settings", {})
+        if not user_cfg.get("favorites_enabled", True):
+            yield event.plain_result("收藏夹功能已被管理员关闭。")
+            return
+        user_id = event.get_sender_id()
+        items = self.favorites.list_by_user(user_id)
+        if not items:
+            yield event.plain_result("你的收藏夹为空。")
+            return
+        lines = [f"⭐ 你的收藏（共 {len(items)} 条）:\n"]
+        for i, item in enumerate(items, 1):
+            lines.append(f"{i}. {item.title} — {item.price} | {item.price_source}")
+            from datetime import datetime
+            t = datetime.fromtimestamp(item.created_at).strftime("%m-%d %H:%M")
+            lines.append(f"   🕐 收藏于 {t} | 🔗 {item.url}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("取消收藏")
+    async def remove_fav(self, event: AstrMessageEvent, index: str = ""):
+        """"取消收藏"命令，删除指定收藏"""
+        user_cfg = self.config.get("user_data_settings", {})
+        if not user_cfg.get("favorites_enabled", True):
+            yield event.plain_result("收藏夹功能已被管理员关闭。")
+            return
+        user_id = event.get_sender_id()
+        try:
+            idx = int(index.strip())
+        except (ValueError, TypeError):
+            yield event.plain_result("用法: 取消收藏 <序号>\n请先使用 我的收藏 查看收藏列表。")
+            return
+        ok = self.favorites.remove(user_id, idx)
+        if ok:
+            yield event.plain_result(f"已取消收藏第 {idx} 条。")
+        else:
+            yield event.plain_result("序号无效，请使用 我的收藏 查看收藏列表。")
 
     def _format_tool_output(self, results: list, keyword: str) -> str:
         """格式化 LLM Tool 的输出

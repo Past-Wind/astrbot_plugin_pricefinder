@@ -215,6 +215,12 @@ __marimo__/
 /test
 /astrbot_plugin_pricefinder.zip
 /old
+/package-lock.json
+
+# OpenCode
+/opencode.json
+/opencode.jsonc
+/.opencode/
 
 # 不忽略 AGENTS.md
 !AGENTS.md
